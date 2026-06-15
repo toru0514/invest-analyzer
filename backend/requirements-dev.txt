@@ -1,0 +1,4 @@
+# テスト用依存（本番 requirements.txt とは分離）。
+#   backend/venv/bin/pip install -r backend/requirements-dev.txt
+pytest==9.1.0
+httpx==0.28.1

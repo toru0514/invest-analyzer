@@ -40,16 +40,20 @@ def test_backtest_reports_all_required_metrics():
 
 
 def test_trades_execute_when_thresholds_low():
-    orig_buy, orig_sell = signals.BUY_THRESHOLD, signals.SELL_THRESHOLD
-    signals.BUY_THRESHOLD, signals.SELL_THRESHOLD = 1, -1
-    try:
-        hist = {tk: synthetic_history(tk, seed=i)
-                for i, tk in enumerate(["8306.T", "7203.T", "9984.T", "6758.T"])}
-        r = run_backtest(hist)
-        assert r["trade_count"] > 0
-        assert r["final"] > 0
-    finally:
-        signals.BUY_THRESHOLD, signals.SELL_THRESHOLD = orig_buy, orig_sell
+    # 閾値を緩めれば（±1）売買が成立することを確認する。
+    hist = {tk: synthetic_history(tk, seed=i)
+            for i, tk in enumerate(["8306.T", "7203.T", "9984.T", "6758.T"])}
+    r = run_backtest(hist, buy_threshold=1, sell_threshold=-1)
+    assert r["trade_count"] > 0
+    assert r["final"] > 0
+
+
+def test_state_based_scoring_reaches_default_threshold():
+    # 状態ベース設計では既定閾値（±2）で売買が成立するはず（v2 の要）。
+    hist = {tk: synthetic_history(tk, seed=i)
+            for i, tk in enumerate(["8306.T", "7203.T", "9984.T", "6758.T"])}
+    r = run_backtest(hist)
+    assert r["trade_count"] > 0
 
 
 if __name__ == "__main__":
@@ -57,4 +61,5 @@ if __name__ == "__main__":
     test_golden_dead_cross_are_exclusive()
     test_backtest_reports_all_required_metrics()
     test_trades_execute_when_thresholds_low()
+    test_state_based_scoring_reaches_default_threshold()
     print("all smoke tests passed")

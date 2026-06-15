@@ -63,7 +63,22 @@ CREATE TABLE IF NOT EXISTS paper_trades (
   signal_id INTEGER,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- アプリ設定の key-value（スコア閾値・スケジューラ設定など）
+CREATE TABLE IF NOT EXISTS app_meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
 """
+
+# app_meta の既定値
+DEFAULT_META = {
+    "buy_threshold": "2",
+    "sell_threshold": "-2",
+    "scheduler_enabled": "0",
+    "scheduler_time": "16:00",   # JST・場後（HH:MM）
+    "scheduler_demo": "0",
+}
 
 # 起動時に投入する初期監視銘柄
 DEFAULT_WATCHLIST = [
@@ -112,6 +127,40 @@ def init_db():
                  for c in DEFAULT_CONFIGS],
             )
 
+        # app_meta の既定値を未設定キーのみ投入
+        conn.executemany(
+            "INSERT OR IGNORE INTO app_meta (key, value) VALUES (?, ?)",
+            list(DEFAULT_META.items()),
+        )
+
+
+# ---- app_meta（設定 key-value） ----
+def get_meta(key: str, default=None):
+    with get_conn() as conn:
+        row = conn.execute("SELECT value FROM app_meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def get_all_meta():
+    with get_conn() as conn:
+        return {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM app_meta")}
+
+
+def set_meta(key: str, value) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO app_meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value)),
+        )
+
+
+def get_thresholds() -> tuple[int, int]:
+    """(buy_threshold, sell_threshold) を返す。"""
+    buy = int(get_meta("buy_threshold", "2"))
+    sell = int(get_meta("sell_threshold", "-2"))
+    return buy, sell
+
 
 # ---- watchlist ----
 def list_watchlist(only_enabled: bool = False):
@@ -148,6 +197,20 @@ def list_configs(active_only: bool = False):
     return rows
 
 
+def add_config(rule_type: str, ticker=None, params=None, weight: int = 1, enabled: int = 1):
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (ticker, rule_type, json.dumps(params or {}), int(weight), 1 if enabled else 0))
+        return cur.lastrowid
+
+
+def delete_config(config_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM signal_config WHERE id = ?", (config_id,))
+
+
 def update_config(config_id: int, weight=None, enabled=None, params=None):
     sets, vals = [], []
     if weight is not None:
@@ -182,6 +245,17 @@ def upsert_prices(ticker: str, df):
             "close=excluded.close, volume=excluded.volume",
             rows,
         )
+
+
+def latest_prices():
+    """各 ticker の最新営業日の終値を {ticker: {date, close}} で返す。"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT p.ticker, p.date, p.close FROM price_data p "
+            "JOIN (SELECT ticker, MAX(date) AS d FROM price_data GROUP BY ticker) m "
+            "ON p.ticker = m.ticker AND p.date = m.d"
+        ).fetchall()
+    return {r["ticker"]: {"date": r["date"], "close": r["close"]} for r in rows}
 
 
 def load_prices(ticker: str):

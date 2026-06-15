@@ -33,9 +33,11 @@ DEFAULT_CONFIGS: list[dict[str, Any]] = [
     # {"rule_type": "price_target", "params": {"above": 1500}, "weight": 1, "enabled": 1},
 ]
 
-# スコア閾値（バックテストで調整する前提）
-BUY_THRESHOLD = 3
-SELL_THRESHOLD = -3
+# スコア閾値（バックテストで調整する前提・UI/DB から上書き可能）。
+# 状態ベース設計（v2）では ma_cross / macd の連続トレンドで ±2 が基準になり、
+# そこに逆張りオシレーターの押し目/戻りが乗ると ±3 になる。±2 を既定とする。
+BUY_THRESHOLD = 2
+SELL_THRESHOLD = -2
 
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -91,7 +93,19 @@ def _val(df: pd.DataFrame, col: str, i: int = -1):
 
 
 def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[int, dict]:
-    """指標列が計算済みの DataFrame の最終行をスコアリングする。"""
+    """指標列が計算済みの DataFrame の最終行をスコアリングする（状態ベース）。
+
+    設計（v2）: 「クロスした当日だけ」発火するエッジ型では 3 指標同時発火がまず
+    起きず、閾値 ±3 にほぼ到達しなかった。そこで各指標を毎営業日の“状態”で評価する：
+
+      - トレンド系（ma_cross / macd）: 並び・符号で常時 ±w を出す連続スコア。
+      - 逆張り系（rsi / stoch / bbands）: 売られすぎ→+w / 買われすぎ→-w のゾーン判定。
+        → 上昇トレンド中の押し目で +1 が乗り score が +3 に届く、という
+          スイングらしい「順張りの押し目買い / 戻り売り」が定常的に成立する。
+      - ローソク足パターン: 出現は稀なのでボーナス（エッジ）として加点。
+
+    すべて当日までのデータのみ参照（look-ahead bias なし）。
+    """
     score, detail = 0, {}
     for cfg in configs:
         if not cfg.get("enabled", 1):
@@ -112,49 +126,52 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[
                 score -= w; detail["rsi"] = -w
 
         elif rt == "ma_cross":
+            # 状態: 短期MA > 長期MA を上昇トレンド、< を下降トレンドとして常時評価。
             short, long = p.get("short", 5), p.get("long", 25)
-            if golden_cross(df, short, long):
-                score += w; detail["ma_cross"] = +w
-            elif dead_cross(df, short, long):
-                score -= w; detail["ma_cross"] = -w
+            if len(df) >= long:
+                cs = _sma(df["close"], short).iloc[-1]
+                cl = _sma(df["close"], long).iloc[-1]
+                if not (pd.isna(cs) or pd.isna(cl)):
+                    if cs > cl:
+                        score += w; detail["ma_cross"] = +w
+                    elif cs < cl:
+                        score -= w; detail["ma_cross"] = -w
 
         elif rt == "macd":
+            # 状態: ヒストグラム（MACD - シグナル）の符号でモメンタムの方向を評価。
             f, s, sig = p.get("fast", 12), p.get("slow", 26), p.get("signal", 9)
-            hist_col = f"MACDh_{f}_{s}_{sig}"
-            cur = _val(df, hist_col, -1)
-            prev = _val(df, hist_col, -2) if len(df) >= 2 else None
-            if cur is None or prev is None:
+            hist = _val(df, f"MACDh_{f}_{s}_{sig}", -1)
+            if hist is None:
                 continue
-            if prev <= 0 < cur:        # ヒストグラムが負→正：シグナル上抜け
+            if hist > 0:
                 score += w; detail["macd"] = +w
-            elif prev >= 0 > cur:      # 正→負：シグナル下抜け
+            elif hist < 0:
                 score -= w; detail["macd"] = -w
 
         elif rt == "bbands":
+            # 状態: 終値が下限バンド以下＝売られすぎ→+w、上限バンド以上＝買われすぎ→-w。
             length, std = p.get("length", 20), p.get("std", 2.0)
             lower = f"BBL_{length}_{std}_{std}"
             upper = f"BBU_{length}_{std}_{std}"
             cur_close = _val(df, "close", -1)
-            prev_close = _val(df, "close", -2) if len(df) >= 2 else None
-            prev_lower = _val(df, lower, -2) if len(df) >= 2 else None
-            prev_upper = _val(df, upper, -2) if len(df) >= 2 else None
-            if None in (cur_close, prev_close, prev_lower, prev_upper):
+            cur_lower = _val(df, lower, -1)
+            cur_upper = _val(df, upper, -1)
+            if None in (cur_close, cur_lower, cur_upper):
                 continue
-            if prev_close <= prev_lower and cur_close > prev_close:   # 下限タッチ後の反発
+            if cur_close <= cur_lower:
                 score += w; detail["bbands"] = +w
-            elif prev_close >= prev_upper and cur_close < prev_close:  # 上限タッチ後の反落
+            elif cur_close >= cur_upper:
                 score -= w; detail["bbands"] = -w
 
         elif rt == "stoch":
+            # 状態: %K が低位（売られすぎ）→+w、高位（買われすぎ）→-w のゾーン判定。
             k, d = p.get("k", 14), p.get("d", 3)
-            kcol, dcol = f"STOCHk_{k}_{d}_3", f"STOCHd_{k}_{d}_3"
-            ck, cd = _val(df, kcol, -1), _val(df, dcol, -1)
-            pk, pd_ = (_val(df, kcol, -2), _val(df, dcol, -2)) if len(df) >= 2 else (None, None)
-            if None in (ck, cd, pk, pd_):
+            ck = _val(df, f"STOCHk_{k}_{d}_3", -1)
+            if ck is None:
                 continue
-            if pk <= pd_ and ck > cd and ck < p.get("low", 20):    # 低位での %K 上抜け
+            if ck < p.get("low", 20):
                 score += w; detail["stoch"] = +w
-            elif pk >= pd_ and ck < cd and ck > p.get("high", 80):  # 高位での %K 下抜け
+            elif ck > p.get("high", 80):
                 score -= w; detail["stoch"] = -w
 
         elif rt == "candle_pattern":
@@ -175,14 +192,24 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[
     return score, detail
 
 
-def evaluate(df: pd.DataFrame, configs: list[dict[str, Any]] | None = None):
+def evaluate(
+    df: pd.DataFrame,
+    configs: list[dict[str, Any]] | None = None,
+    buy_threshold: int = BUY_THRESHOLD,
+    sell_threshold: int = SELL_THRESHOLD,
+):
     """df: OHLCV（小文字列・古い順）。最終行についてスコア判定する。
 
+    buy_threshold / sell_threshold は UI から調整可能（DB 保存値を渡す）。
     戻り値: (score, direction, detail)
     """
     if configs is None:
         configs = DEFAULT_CONFIGS
     df_ind = add_indicators(df)
     score, detail = _score_indicators(df_ind, configs)
-    direction = "buy" if score >= BUY_THRESHOLD else "sell" if score <= SELL_THRESHOLD else "neutral"
+    direction = (
+        "buy" if score >= buy_threshold
+        else "sell" if score <= sell_threshold
+        else "neutral"
+    )
     return score, direction, detail

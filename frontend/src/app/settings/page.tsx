@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, SignalConfig, WatchItem } from "@/lib/api";
+import { api, AppSettings, SignalConfig, WatchItem } from "@/lib/api";
 import Disclaimer from "@/components/Disclaimer";
 
 const RULE_LABELS: Record<string, string> = {
@@ -14,20 +14,57 @@ const RULE_LABELS: Record<string, string> = {
   price_target: "指定金額アラート",
 };
 
+// 指標ごとに編集できる params 定義（RSI の 30/70、MA の期間など）
+type ParamField = { key: string; label: string; step?: number };
+const PARAM_FIELDS: Record<string, ParamField[]> = {
+  rsi: [
+    { key: "length", label: "期間" },
+    { key: "low", label: "売られすぎ" },
+    { key: "high", label: "買われすぎ" },
+  ],
+  ma_cross: [
+    { key: "short", label: "短期" },
+    { key: "long", label: "長期" },
+  ],
+  macd: [
+    { key: "fast", label: "Fast" },
+    { key: "slow", label: "Slow" },
+    { key: "signal", label: "Signal" },
+  ],
+  bbands: [
+    { key: "length", label: "期間" },
+    { key: "std", label: "σ", step: 0.1 },
+  ],
+  stoch: [
+    { key: "k", label: "%K" },
+    { key: "d", label: "%D" },
+    { key: "low", label: "売られすぎ" },
+    { key: "high", label: "買われすぎ" },
+  ],
+  candle_pattern: [],
+};
+
 export default function Settings() {
   const [watch, setWatch] = useState<WatchItem[]>([]);
   const [configs, setConfigs] = useState<SignalConfig[]>([]);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
   const [ticker, setTicker] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  // price_target 追加フォーム
+  const [ptTicker, setPtTicker] = useState("");
+  const [ptAbove, setPtAbove] = useState("");
+  const [ptBelow, setPtBelow] = useState("");
 
   async function load() {
     setError(null);
     try {
-      const [w, c] = await Promise.all([api.getWatchlist(), api.getConfig()]);
+      const [w, c, s] = await Promise.all([api.getWatchlist(), api.getConfig(), api.getSettings()]);
       setWatch(w);
       setConfigs(c);
+      setSettings(s);
     } catch (e) {
       setError(String(e));
     }
@@ -36,6 +73,11 @@ export default function Settings() {
   useEffect(() => {
     load();
   }, []);
+
+  function flash(msg: string) {
+    setSaved(msg);
+    setTimeout(() => setSaved(null), 2500);
+  }
 
   async function addStock(e: React.FormEvent) {
     e.preventDefault();
@@ -59,24 +101,77 @@ export default function Settings() {
     setConfigs((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   }
 
+  function setParam(id: number, key: string, value: number) {
+    setConfigs((cs) =>
+      cs.map((c) => (c.id === id ? { ...c, params: { ...c.params, [key]: value } } : c)),
+    );
+  }
+
   async function saveConfigs() {
-    setSaved(false);
     try {
       await api.updateConfig(
-        configs.map((c) => ({ id: c.id, weight: c.weight, enabled: !!c.enabled })),
+        indicatorConfigs.map((c) => ({
+          id: c.id,
+          weight: c.weight,
+          enabled: !!c.enabled,
+          params: c.params,
+        })),
       );
-      setSaved(true);
+      flash("指標設定を保存しました。");
       await load();
     } catch (e) {
       setError(String(e));
     }
   }
 
+  async function saveSettings() {
+    if (!settings) return;
+    try {
+      await api.updateSettings(settings);
+      flash("スコア閾値・スケジューラ設定を保存しました。");
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function addPriceTarget(e: React.FormEvent) {
+    e.preventDefault();
+    const above = ptAbove.trim() === "" ? undefined : Number(ptAbove);
+    const below = ptBelow.trim() === "" ? undefined : Number(ptBelow);
+    if (!ptTicker || (above === undefined && below === undefined)) {
+      setError("ティッカーと、上限/下限の少なくとも一方を入力してください。");
+      return;
+    }
+    try {
+      const params: Record<string, number> = {};
+      if (above !== undefined) params.above = above;
+      if (below !== undefined) params.below = below;
+      await api.addConfig({ rule_type: "price_target", ticker: ptTicker, params });
+      setPtAbove("");
+      setPtBelow("");
+      flash("指定金額アラートを追加しました。");
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function removePriceTarget(id: number) {
+    await api.deleteConfig(id);
+    await load();
+  }
+
+  const indicatorConfigs = configs.filter((c) => c.rule_type !== "price_target");
+  const priceTargets = configs.filter((c) => c.rule_type === "price_target");
+
   return (
     <div>
       <h1 className="mb-4 text-xl font-bold">設定</h1>
       {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {saved && <p className="mb-3 rounded bg-green-50 px-3 py-2 text-sm text-green-700">{saved}</p>}
 
+      {/* 監視銘柄 */}
       <section className="mb-8 rounded border bg-white p-4">
         <h2 className="mb-3 font-semibold">監視銘柄</h2>
         <form onSubmit={addStock} className="mb-4 flex flex-wrap gap-2 text-sm">
@@ -109,28 +204,89 @@ export default function Settings() {
         </ul>
       </section>
 
-      <section className="rounded border bg-white p-4">
+      {/* スコア閾値・スケジューラ */}
+      {settings && (
+        <section className="mb-8 rounded border bg-white p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-semibold">スコア閾値・自動更新</h2>
+            <button onClick={saveSettings} className="rounded bg-green-600 px-3 py-1 text-sm text-white hover:bg-green-700">
+              保存
+            </button>
+          </div>
+          <div className="flex flex-wrap items-end gap-4 text-sm">
+            <label className="flex flex-col gap-1">
+              買い判定の閾値（スコア ≥）
+              <input
+                type="number"
+                value={settings.buy_threshold}
+                onChange={(e) => setSettings({ ...settings, buy_threshold: Number(e.target.value) })}
+                className="w-24 rounded border px-2 py-1"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              売り判定の閾値（スコア ≤）
+              <input
+                type="number"
+                value={settings.sell_threshold}
+                onChange={(e) => setSettings({ ...settings, sell_threshold: Number(e.target.value) })}
+                className="w-24 rounded border px-2 py-1"
+              />
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap items-end gap-4 border-t pt-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={settings.scheduler_enabled}
+                onChange={(e) => setSettings({ ...settings, scheduler_enabled: e.target.checked })}
+              />
+              日次自動更新を有効化
+            </label>
+            <label className="flex flex-col gap-1">
+              実行時刻（JST・場後）
+              <input
+                type="time"
+                value={settings.scheduler_time}
+                onChange={(e) => setSettings({ ...settings, scheduler_time: e.target.value })}
+                className="w-32 rounded border px-2 py-1"
+              />
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={settings.scheduler_demo}
+                onChange={(e) => setSettings({ ...settings, scheduler_demo: e.target.checked })}
+              />
+              demo（合成データ）で実行
+            </label>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            自動更新は API プロセス常駐中のみ動作します（毎営業日まとめて refresh→判定→通知）。自動売買は行いません。
+          </p>
+        </section>
+      )}
+
+      {/* シグナル指標（重み・有効・params） */}
+      <section className="mb-8 rounded border bg-white p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-semibold">シグナル指標（どの技を使うか・重み）</h2>
+          <h2 className="font-semibold">シグナル指標（どの技を使うか・重み・パラメータ）</h2>
           <button onClick={saveConfigs} className="rounded bg-green-600 px-3 py-1 text-sm text-white hover:bg-green-700">
             保存
           </button>
         </div>
-        {saved && <p className="mb-2 text-sm text-green-700">保存しました。</p>}
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
               <th className="px-3 py-2">指標</th>
-              <th className="px-3 py-2">対象</th>
               <th className="px-3 py-2">重み</th>
+              <th className="px-3 py-2">パラメータ</th>
               <th className="px-3 py-2">有効</th>
             </tr>
           </thead>
           <tbody>
-            {configs.map((c) => (
-              <tr key={c.id} className="border-t">
+            {indicatorConfigs.map((c) => (
+              <tr key={c.id} className="border-t align-top">
                 <td className="px-3 py-2">{RULE_LABELS[c.rule_type] ?? c.rule_type}</td>
-                <td className="px-3 py-2 text-slate-500">{c.ticker ?? "全銘柄共通"}</td>
                 <td className="px-3 py-2">
                   <input
                     type="number"
@@ -139,6 +295,25 @@ export default function Settings() {
                     onChange={(e) => setLocal(c.id, { weight: Number(e.target.value) })}
                     className="w-16 rounded border px-2 py-0.5"
                   />
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-2">
+                    {(PARAM_FIELDS[c.rule_type] ?? []).map((f) => (
+                      <label key={f.key} className="flex items-center gap-1 text-xs text-slate-600">
+                        {f.label}
+                        <input
+                          type="number"
+                          step={f.step ?? 1}
+                          value={Number(c.params?.[f.key] ?? 0)}
+                          onChange={(e) => setParam(c.id, f.key, Number(e.target.value))}
+                          className="w-16 rounded border px-2 py-0.5"
+                        />
+                      </label>
+                    ))}
+                    {(PARAM_FIELDS[c.rule_type] ?? []).length === 0 && (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-3 py-2">
                   <input
@@ -152,7 +327,71 @@ export default function Settings() {
           </tbody>
         </table>
         <p className="mt-3 text-xs text-slate-500">
-          スコア閾値（買い ≥ 3 / 売り ≤ -3）と各重みは、シミュレーション結果を見て調整してください。
+          状態ベースのスコアです：トレンド系（MA/MACD）が常時 ±重み、逆張り系（RSI/ストキャス/BB）が
+          売られすぎ/買われすぎで加点。合計が上の閾値を超えると買い/売り判定になります。
+        </p>
+      </section>
+
+      {/* 指定金額アラート（price_target） */}
+      <section className="rounded border bg-white p-4">
+        <h2 className="mb-3 font-semibold">指定金額アラート（上限/下限）</h2>
+        <form onSubmit={addPriceTarget} className="mb-4 flex flex-wrap items-end gap-2 text-sm">
+          <label className="flex flex-col gap-1">
+            銘柄
+            <select
+              value={ptTicker}
+              onChange={(e) => setPtTicker(e.target.value)}
+              className="rounded border px-2 py-1"
+            >
+              <option value="">選択…</option>
+              {watch.map((w) => (
+                <option key={w.id} value={w.ticker}>
+                  {w.ticker} — {w.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            上限（≥ で売り通知）
+            <input
+              type="number"
+              value={ptAbove}
+              onChange={(e) => setPtAbove(e.target.value)}
+              placeholder="例: 3300"
+              className="w-28 rounded border px-2 py-1"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            下限（≤ で買い通知）
+            <input
+              type="number"
+              value={ptBelow}
+              onChange={(e) => setPtBelow(e.target.value)}
+              placeholder="例: 3000"
+              className="w-28 rounded border px-2 py-1"
+            />
+          </label>
+          <button className="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-700">追加</button>
+        </form>
+        <ul className="divide-y text-sm">
+          {priceTargets.map((c) => (
+            <li key={c.id} className="flex items-center justify-between py-2">
+              <span>
+                <span className="font-mono">{c.ticker}</span>
+                {c.params?.above != null && <span className="ml-2">上限 ≥ {String(c.params.above)}</span>}
+                {c.params?.below != null && <span className="ml-2">下限 ≤ {String(c.params.below)}</span>}
+              </span>
+              <button onClick={() => removePriceTarget(c.id)} className="text-red-600 hover:underline">
+                削除
+              </button>
+            </li>
+          ))}
+          {priceTargets.length === 0 && (
+            <li className="py-2 text-slate-500">アラートは未登録です。</li>
+          )}
+        </ul>
+        <p className="mt-3 text-xs text-slate-500">
+          指定金額アラートはスコアと独立した即時通知です。データ更新時に最新終値が上限以上/下限以下なら通知します。
         </p>
       </section>
 

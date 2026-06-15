@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -15,21 +16,33 @@ from pydantic import BaseModel
 import db
 from backtest import run_backtest
 from market import get_history
-from signals import BUY_THRESHOLD, SELL_THRESHOLD, evaluate
+from scheduler import DailyScheduler
+from signals import evaluate
 
-app = FastAPI(title="株価シグナル通知アプリ API", version="0.2.0")
+_scheduler: DailyScheduler | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _scheduler
+    db.init_db()
+    _scheduler = DailyScheduler(perform_refresh)
+    _scheduler.start()
+    yield
+    if _scheduler:
+        _scheduler.stop()
+
+
+app = FastAPI(title="株価シグナル通知アプリ API", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    # ローカル専用。Next.js は :3000 が埋まっていると :3001 等に逃げるため、
+    # localhost / 127.0.0.1 の任意ポートを許可する。
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def _startup():
-    db.init_db()
 
 
 # ---------------------------------------------------------------------------
@@ -64,12 +77,51 @@ class BacktestIn(BaseModel):
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
+    buy, sell = db.get_thresholds()
     return {
         "app": "株価シグナル通知アプリ API",
-        "buy_threshold": BUY_THRESHOLD,
-        "sell_threshold": SELL_THRESHOLD,
+        "buy_threshold": buy,
+        "sell_threshold": sell,
         "disclaimer": "シグナルは予測を保証しません。投資は自己責任で。",
     }
+
+
+# ---------------------------------------------------------------------------
+# settings（スコア閾値・スケジューラ設定）
+# ---------------------------------------------------------------------------
+class SettingsUpdate(BaseModel):
+    buy_threshold: Optional[int] = None
+    sell_threshold: Optional[int] = None
+    scheduler_enabled: Optional[bool] = None
+    scheduler_time: Optional[str] = None
+    scheduler_demo: Optional[bool] = None
+
+
+@app.get("/settings")
+def get_settings():
+    m = db.get_all_meta()
+    return {
+        "buy_threshold": int(m.get("buy_threshold", 2)),
+        "sell_threshold": int(m.get("sell_threshold", -2)),
+        "scheduler_enabled": m.get("scheduler_enabled", "0") == "1",
+        "scheduler_time": m.get("scheduler_time", "16:00"),
+        "scheduler_demo": m.get("scheduler_demo", "0") == "1",
+    }
+
+
+@app.put("/settings")
+def put_settings(payload: SettingsUpdate):
+    if payload.buy_threshold is not None:
+        db.set_meta("buy_threshold", payload.buy_threshold)
+    if payload.sell_threshold is not None:
+        db.set_meta("sell_threshold", payload.sell_threshold)
+    if payload.scheduler_enabled is not None:
+        db.set_meta("scheduler_enabled", "1" if payload.scheduler_enabled else "0")
+    if payload.scheduler_time is not None:
+        db.set_meta("scheduler_time", payload.scheduler_time)
+    if payload.scheduler_demo is not None:
+        db.set_meta("scheduler_demo", "1" if payload.scheduler_demo else "0")
+    return get_settings()
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +159,28 @@ def put_config(payload: ConfigUpdateList):
     return db.list_configs()
 
 
+class ConfigCreate(BaseModel):
+    rule_type: str
+    ticker: Optional[str] = None
+    params: Optional[dict[str, Any]] = None
+    weight: int = 1
+    enabled: bool = True
+
+
+@app.post("/config")
+def post_config(payload: ConfigCreate):
+    new_id = db.add_config(payload.rule_type, ticker=payload.ticker,
+                           params=payload.params, weight=payload.weight,
+                           enabled=payload.enabled)
+    return {"id": new_id}
+
+
+@app.delete("/config/{config_id}")
+def remove_config(config_id: int):
+    db.delete_config(config_id)
+    return {"deleted": config_id}
+
+
 # ---------------------------------------------------------------------------
 # signals
 # ---------------------------------------------------------------------------
@@ -133,6 +207,12 @@ def mark_notified(payload: MarkNotifiedIn):
 # ---------------------------------------------------------------------------
 # prices（チャート用）
 # ---------------------------------------------------------------------------
+@app.get("/prices_latest")
+def get_latest_prices():
+    """監視一覧の最新終値（{ticker: {date, close}}）。ダッシュボードの現在値用。"""
+    return db.latest_prices()
+
+
 @app.get("/prices/{ticker}")
 def get_prices(ticker: str):
     df = db.load_prices(ticker)
@@ -163,10 +243,14 @@ def _check_price_targets(ticker: str, last_close: float, configs: list[dict]):
     return None
 
 
-@app.post("/refresh")
-def refresh(demo: bool = Query(False), period: str = Query("6mo")):
+def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
+    """最新データ取得 + 再判定（全 enabled 銘柄）の中核。
+
+    HTTP エンドポイントとスケジューラの両方から呼ぶ。
+    """
     watch = db.list_watchlist(only_enabled=True)
     all_configs = db.list_configs(active_only=True)
+    buy_th, sell_th = db.get_thresholds()
     # ticker 別 + 全銘柄共通(NULL) の設定を組み合わせる
     common = [c for c in all_configs if c["ticker"] is None]
 
@@ -181,7 +265,7 @@ def refresh(demo: bool = Query(False), period: str = Query("6mo")):
         db.upsert_prices(ticker, df)
 
         ticker_cfgs = common + [c for c in all_configs if c["ticker"] == ticker]
-        score, direction, detail = evaluate(df, ticker_cfgs)
+        score, direction, detail = evaluate(df, ticker_cfgs, buy_th, sell_th)
         last_close = float(df["close"].iloc[-1])
         date = str(df.index[-1].date())
 
@@ -197,6 +281,11 @@ def refresh(demo: bool = Query(False), period: str = Query("6mo")):
 
     return {"updated": results, "failed": failed,
             "note": "yfinance 取得失敗時は demo=true で合成データを使えます。" if failed else None}
+
+
+@app.post("/refresh")
+def refresh(demo: bool = Query(False), period: str = Query("6mo")):
+    return perform_refresh(demo=demo, period=period)
 
 
 # ---------------------------------------------------------------------------
@@ -227,9 +316,11 @@ def backtest(payload: BacktestIn):
             status_code=502,
             detail="価格データを取得できませんでした（ネットワーク制限時は demo=true）。")
 
+    buy_th, sell_th = db.get_thresholds()
     result = run_backtest(histories, configs=common,
                           initial_capital=payload.initial_capital,
-                          backtest_days=payload.days)
+                          backtest_days=payload.days,
+                          buy_threshold=buy_th, sell_threshold=sell_th)
     result["failed"] = failed
 
     if payload.persist:

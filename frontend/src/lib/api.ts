@@ -42,6 +42,14 @@ export type SignalConfig = {
   enabled: number;
 };
 
+export type AppSettings = {
+  buy_threshold: number;
+  sell_threshold: number;
+  scheduler_enabled: boolean;
+  scheduler_time: string;
+  scheduler_demo: boolean;
+};
+
 export type Candle = {
   date: string;
   open: number;
@@ -89,6 +97,14 @@ export const api = {
   getConfig: () => req<SignalConfig[]>("/config"),
   updateConfig: (updates: { id: number; weight?: number; enabled?: boolean; params?: Record<string, unknown> }[]) =>
     req<SignalConfig[]>("/config", { method: "PUT", body: JSON.stringify({ updates }) }),
+  addConfig: (body: { rule_type: string; ticker?: string | null; params?: Record<string, unknown>; weight?: number; enabled?: boolean }) =>
+    req<{ id: number }>("/config", { method: "POST", body: JSON.stringify(body) }),
+  deleteConfig: (id: number) =>
+    req<{ deleted: number }>(`/config/${id}`, { method: "DELETE" }),
+
+  getSettings: () => req<AppSettings>("/settings"),
+  updateSettings: (patch: Partial<AppSettings>) =>
+    req<AppSettings>("/settings", { method: "PUT", body: JSON.stringify(patch) }),
 
   getSignals: (ticker?: string, limit = 100) =>
     req<Signal[]>(`/signals?${ticker ? `ticker=${encodeURIComponent(ticker)}&` : ""}limit=${limit}`),
@@ -97,6 +113,8 @@ export const api = {
     req<{ marked: number[] }>("/signals/mark_notified", { method: "POST", body: JSON.stringify({ ids }) }),
 
   getPrices: (ticker: string) => req<Candle[]>(`/prices/${encodeURIComponent(ticker)}`),
+  getLatestPrices: () =>
+    req<Record<string, { date: string; close: number }>>("/prices_latest"),
 
   refresh: (demo: boolean) =>
     req<{ updated: RefreshRow[]; failed: string[]; note: string | null }>(
