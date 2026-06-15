@@ -22,6 +22,15 @@ type Row = {
   score: number | null;
   direction: Direction | null;
   date: string | null;
+  volRatio: number | null;
+  weeklyTrend: string | null;
+};
+
+const TREND_LABEL: Record<string, string> = { up: "↑", down: "↓", flat: "→" };
+const TREND_CLASS: Record<string, string> = {
+  up: "text-green-700",
+  down: "text-red-700",
+  flat: "text-slate-400",
 };
 
 const columnHelper = createColumnHelper<Row>();
@@ -90,6 +99,23 @@ export default function Dashboard() {
       columnHelper.accessor("score", {
         header: "本日スコア",
         cell: (c) => (c.getValue() == null ? "—" : c.getValue()),
+      }),
+      columnHelper.accessor("volRatio", {
+        header: "出来高倍率",
+        cell: (c) => {
+          const v = c.getValue();
+          if (v == null) return "—";
+          const cls = v >= 1.5 ? "text-blue-700 font-semibold" : v < 0.7 ? "text-slate-400" : "";
+          return <span className={cls}>{v.toFixed(2)}倍</span>;
+        },
+      }),
+      columnHelper.accessor("weeklyTrend", {
+        header: "週足",
+        cell: (c) => {
+          const v = c.getValue();
+          if (!v) return "—";
+          return <span className={TREND_CLASS[v] ?? ""}>{TREND_LABEL[v] ?? v}</span>;
+        },
       }),
       columnHelper.accessor("direction", {
         header: "判定",
@@ -161,7 +187,7 @@ export default function Dashboard() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
                   監視銘柄がありません。設定画面で追加してください。
                 </td>
               </tr>
@@ -187,6 +213,8 @@ function mergeRows(
   return watch.map((w) => {
     const s = latest.get(w.ticker);
     const p = prices[w.ticker];
+    const vr = s && typeof s.detail?.vol_ratio === "number" ? (s.detail.vol_ratio as number) : null;
+    const wt = s && typeof s.detail?.weekly_trend === "string" ? (s.detail.weekly_trend as string) : null;
     return {
       id: w.id,
       ticker: w.ticker,
@@ -195,6 +223,8 @@ function mergeRows(
       score: s ? s.score : null,
       direction: s ? s.direction : null,
       date: s ? s.date : null,
+      volRatio: vr,
+      weeklyTrend: wt,
     };
   });
 }
@@ -203,6 +233,9 @@ function applyRefresh(rows: Row[], updated: RefreshRow[]): Row[] {
   const byTicker = new Map(updated.map((u) => [u.ticker, u]));
   return rows.map((r) => {
     const u = byTicker.get(r.ticker);
-    return u ? { ...r, price: u.price, score: u.score, direction: u.direction, date: u.date } : r;
+    if (!u) return r;
+    const vr = typeof u.detail?.vol_ratio === "number" ? (u.detail.vol_ratio as number) : r.volRatio;
+    const wt = typeof u.detail?.weekly_trend === "string" ? (u.detail.weekly_trend as string) : r.weeklyTrend;
+    return { ...r, price: u.price, score: u.score, direction: u.direction, date: u.date, volRatio: vr, weeklyTrend: wt };
   });
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 const links = [
   { href: "/", label: "ダッシュボード" },
+  { href: "/plan", label: "作戦ボード" },
   { href: "/settings", label: "設定" },
   { href: "/simulation", label: "シミュレーション" },
 ];

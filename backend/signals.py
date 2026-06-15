@@ -29,6 +29,10 @@ DEFAULT_CONFIGS: list[dict[str, Any]] = [
     {"rule_type": "bbands", "params": {"length": 20, "std": 2.0}, "weight": 1, "enabled": 1},
     {"rule_type": "stoch", "params": {"k": 14, "d": 3, "low": 20, "high": 80}, "weight": 1, "enabled": 1},
     {"rule_type": "candle_pattern", "params": {}, "weight": 1, "enabled": 1},
+    # 追補版の強化（B/C/D）。スコアを多面的に補正する。
+    {"rule_type": "volume_filter", "params": {"sma": 20, "surge": 1.5, "quiet": 0.7, "bonus": 1}, "weight": 1, "enabled": 1},
+    {"rule_type": "weekly_trend_filter", "params": {"sma": 13, "mode": "penalty"}, "weight": 1, "enabled": 1},
+    {"rule_type": "atr_exit", "params": {"length": 14, "stop_mult": 1.5, "target_mult": 2.0, "limit_method": "support", "support_n": 20}, "weight": 1, "enabled": 1},
     # price_target はスコアと独立した「即通知」経路。バックテストのスコアには算入しない。
     # {"rule_type": "price_target", "params": {"above": 1500}, "weight": 1, "enabled": 1},
 ]
@@ -90,6 +94,67 @@ def _val(df: pd.DataFrame, col: str, i: int = -1):
         return None
     v = df[col].iloc[i]
     return None if pd.isna(v) else v
+
+
+def _find_cfg(configs: list[dict[str, Any]], rule_type: str) -> dict | None:
+    """有効な指定 rule_type の params を返す（無ければ None）。"""
+    for c in configs:
+        if c.get("rule_type") == rule_type and c.get("enabled", 1):
+            p = c.get("params") or {}
+            if isinstance(p, str):
+                p = json.loads(p or "{}")
+            return p
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 追補版の強化で使う計算（すべて当日までのデータのみ参照＝look-ahead bias なし）
+# ---------------------------------------------------------------------------
+def volume_ratio(df: pd.DataFrame, sma: int = 20) -> float | None:
+    """当日出来高 ÷ 出来高移動平均（強化1）。"""
+    if "volume" not in df.columns or len(df) < sma:
+        return None
+    vsma = df["volume"].rolling(sma).mean().iloc[-1]
+    last = df["volume"].iloc[-1]
+    if pd.isna(vsma) or vsma <= 0 or pd.isna(last):
+        return None
+    return float(last) / float(vsma)
+
+
+def weekly_trend(df: pd.DataFrame, sma: int = 13, lookback: int = 4,
+                 flat_eps: float = 0.002) -> str:
+    """日足を週足にリサンプルし、週足 SMA の傾きで 'up'/'down'/'flat' を返す（強化2）。
+
+    別途 yfinance で週足を取得する代わりに、同じ日足データから週足を作る。
+    これにより各営業日の判定はその日までのデータのみで完結し、look-ahead bias を避けられる。
+    """
+    if not isinstance(df.index, pd.DatetimeIndex) or len(df) < 5:
+        return "flat"
+    weekly_close = df["close"].resample("W").last().dropna()
+    if len(weekly_close) < sma + lookback:
+        return "flat"
+    s = weekly_close.rolling(sma).mean()
+    cur, prev = s.iloc[-1], s.iloc[-1 - lookback]
+    if pd.isna(cur) or pd.isna(prev) or prev == 0:
+        return "flat"
+    chg = (cur - prev) / abs(prev)
+    if chg > flat_eps:
+        return "up"
+    if chg < -flat_eps:
+        return "down"
+    return "flat"
+
+
+def atr_value(df: pd.DataFrame, length: int = 14) -> float | None:
+    """ATR（Average True Range・期間 length）の最新値（強化3）。"""
+    if len(df) < length + 1:
+        return None
+    high, low, close = df["high"], df["low"], df["close"]
+    prev_close = close.shift(1)
+    tr = pd.concat([(high - low), (high - prev_close).abs(), (low - prev_close).abs()],
+                   axis=1).max(axis=1)
+    atr = tr.rolling(length).mean().iloc[-1]
+    return None if pd.isna(atr) else float(atr)
 
 
 def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[int, dict]:
@@ -207,9 +272,103 @@ def evaluate(
         configs = DEFAULT_CONFIGS
     df_ind = add_indicators(df)
     score, detail = _score_indicators(df_ind, configs)
-    direction = (
-        "buy" if score >= buy_threshold
-        else "sell" if score <= sell_threshold
-        else "neutral"
-    )
+
+    # --- 強化1: 出来高フィルター（スコアにボーナス/減衰） ---
+    vf = _find_cfg(configs, "volume_filter")
+    if vf is not None:
+        vr = volume_ratio(df, int(vf.get("sma", 20)))
+        if vr is not None:
+            detail["vol_ratio"] = round(vr, 2)
+            if score != 0:
+                surge = float(vf.get("surge", 1.5))
+                quiet = float(vf.get("quiet", 0.7))
+                bonus = int(vf.get("bonus", 1))
+                if vr >= surge:
+                    s = 1 if score > 0 else -1
+                    score += s * bonus
+                    detail["volume"] = s * bonus
+                elif vr < quiet:
+                    score = int(score / 2)   # 0 方向へ減衰
+                    detail["volume"] = "quiet"
+
+    def _direction(sc: int) -> str:
+        return "buy" if sc >= buy_threshold else "sell" if sc <= sell_threshold else "neutral"
+
+    direction = _direction(score)
+
+    # --- 強化2: 週足トレンド足切り（逆行する向きを block / penalty） ---
+    wf = _find_cfg(configs, "weekly_trend_filter")
+    if wf is not None:
+        wt = weekly_trend(df, int(wf.get("sma", 13)))
+        detail["weekly_trend"] = wt
+        mode = wf.get("mode", "penalty")
+        opposing = (direction == "buy" and wt == "down") or (direction == "sell" and wt == "up")
+        if opposing:
+            if mode == "block":
+                detail["weekly_filter"] = "blocked"
+                direction = "neutral"
+            else:  # penalty: 逆方向へ 2 減点して再判定
+                score += -2 if direction == "buy" else 2
+                detail["weekly_filter"] = -2 if direction == "buy" else 2
+                direction = _direction(score)
+
     return score, direction, detail
+
+
+def _sma_last(series: pd.Series, length: int):
+    v = series.rolling(length).mean().iloc[-1]
+    return None if pd.isna(v) else float(v)
+
+
+def build_plan(df: pd.DataFrame, direction: str, score: int,
+               configs: list[dict[str, Any]] | None = None) -> dict:
+    """作戦ボード1行分を組み立てる（強化3・4）。
+
+    ATR から損切/利確を、サポート/MA/ATR から提案指値を算出する。
+    direction が neutral の場合も close・vol/週足は埋め、指値類は None。
+    戻り値: {limit_price, stop_price, target_price, atr, rationale}
+    """
+    if configs is None:
+        configs = DEFAULT_CONFIGS
+    p = _find_cfg(configs, "atr_exit") or {}
+    length = int(p.get("length", 14))
+    stop_mult = float(p.get("stop_mult", 1.5))
+    target_mult = float(p.get("target_mult", 2.0))
+    method = p.get("limit_method", "support")
+    support_n = int(p.get("support_n", 20))
+
+    close = float(df["close"].iloc[-1])
+    atr = atr_value(df, length)
+    out: dict[str, Any] = {"limit_price": None, "stop_price": None,
+                           "target_price": None, "atr": atr, "rationale": None}
+    if direction not in ("buy", "sell") or atr is None:
+        return out
+
+    ma_short = _sma_last(df["close"], 5)
+    ma_long = _sma_last(df["close"], 25)
+
+    if direction == "buy":
+        out["stop_price"] = close - stop_mult * atr
+        out["target_price"] = close + target_mult * atr
+        support = float(df["low"].rolling(support_n).min().iloc[-1])
+        atr_basis = close - 0.5 * atr
+        candidates = {"support": support * 1.003,
+                      "ma": ma_short if ma_short is not None else close,
+                      "atr": atr_basis}
+        out["limit_price"] = candidates.get(method, candidates["support"])
+        out["rationale"] = (
+            f"サポート{support:.0f} / 5日線{(ma_short or 0):.0f} / ATR基準{atr_basis:.0f}"
+            f"（方式: {method}）")
+    else:  # sell
+        out["stop_price"] = close + stop_mult * atr
+        out["target_price"] = close - target_mult * atr
+        resistance = float(df["high"].rolling(support_n).max().iloc[-1])
+        atr_basis = close + 0.5 * atr
+        candidates = {"support": resistance * 0.997,
+                      "ma": ma_short if ma_short is not None else close,
+                      "atr": atr_basis}
+        out["limit_price"] = candidates.get(method, candidates["support"])
+        out["rationale"] = (
+            f"レジスタンス{resistance:.0f} / 5日線{(ma_short or 0):.0f} / ATR基準{atr_basis:.0f}"
+            f"（方式: {method}・成行も可）")
+    return out

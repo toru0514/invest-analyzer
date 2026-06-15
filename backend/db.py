@@ -69,6 +69,23 @@ CREATE TABLE IF NOT EXISTS app_meta (
   key   TEXT PRIMARY KEY,
   value TEXT
 );
+
+-- 作戦ボード（追補版 強化4）: 翌営業日の判定・提案指値・出口
+CREATE TABLE IF NOT EXISTS daily_plan (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticker        TEXT NOT NULL,
+  plan_date     TEXT NOT NULL,
+  direction     TEXT,
+  score         INTEGER,
+  vol_ratio     REAL,
+  weekly_trend  TEXT,
+  limit_price   REAL,
+  stop_price    REAL,
+  target_price  REAL,
+  rationale     TEXT,
+  created_at    TEXT DEFAULT (datetime('now')),
+  UNIQUE (ticker, plan_date)
+);
 """
 
 # app_meta の既定値
@@ -126,6 +143,17 @@ def init_db():
                 [(c["rule_type"], json.dumps(c["params"]), c["weight"], c["enabled"])
                  for c in DEFAULT_CONFIGS],
             )
+
+        # 追補版で追加した rule_type（volume_filter / weekly_trend_filter / atr_exit）を
+        # 既存DBにも補完する（無いものだけ挿入）。
+        existing = {r["rule_type"] for r in conn.execute(
+            "SELECT rule_type FROM signal_config WHERE ticker IS NULL").fetchall()}
+        for c in DEFAULT_CONFIGS:
+            if c["rule_type"] not in existing:
+                conn.execute(
+                    "INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+                    "VALUES (NULL, ?, ?, ?, ?)",
+                    (c["rule_type"], json.dumps(c["params"]), c["weight"], c["enabled"]))
 
         # app_meta の既定値を未設定キーのみ投入
         conn.executemany(
@@ -330,3 +358,40 @@ def list_paper_trades(ticker=None):
     q += " ORDER BY date, id"
     with get_conn() as conn:
         return [dict(r) for r in conn.execute(q, params).fetchall()]
+
+
+# ---- daily_plan（作戦ボード） ----
+def upsert_plan(row: dict):
+    """1銘柄分の作戦を (ticker, plan_date) で upsert。"""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO daily_plan "
+            "(ticker, plan_date, direction, score, vol_ratio, weekly_trend, "
+            " limit_price, stop_price, target_price, rationale) "
+            "VALUES (:ticker, :plan_date, :direction, :score, :vol_ratio, :weekly_trend, "
+            " :limit_price, :stop_price, :target_price, :rationale) "
+            "ON CONFLICT(ticker, plan_date) DO UPDATE SET "
+            "direction=excluded.direction, score=excluded.score, vol_ratio=excluded.vol_ratio, "
+            "weekly_trend=excluded.weekly_trend, limit_price=excluded.limit_price, "
+            "stop_price=excluded.stop_price, target_price=excluded.target_price, "
+            "rationale=excluded.rationale, created_at=datetime('now')",
+            row)
+
+
+def latest_plan_date():
+    with get_conn() as conn:
+        row = conn.execute("SELECT MAX(plan_date) AS d FROM daily_plan").fetchone()
+    return row["d"] if row else None
+
+
+def list_plan(plan_date=None):
+    if plan_date is None:
+        plan_date = latest_plan_date()
+    if plan_date is None:
+        return []
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM daily_plan WHERE plan_date = ? ORDER BY "
+            "CASE direction WHEN 'buy' THEN 0 WHEN 'sell' THEN 1 ELSE 2 END, ticker",
+            (plan_date,)).fetchall()
+    return [dict(r) for r in rows]
