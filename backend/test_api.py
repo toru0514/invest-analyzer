@@ -51,8 +51,8 @@ def test_watchlist_crud(client):
 def test_config_crud_and_price_target(client):
     configs = client.get("/config").json()
     indicators = [c for c in configs if c["rule_type"] != "price_target"]
-    # 既定: 状態ベース6指標 + 追補版3フィルター（volume/weekly/atr）= 9
-    assert len(indicators) == 9
+    # 既定: 状態ベース6指標 + 乖離率 + 追補版3フィルター（volume/weekly/atr）= 10
+    assert len(indicators) == 10
 
     # 重み更新
     target = indicators[0]
@@ -157,3 +157,13 @@ def test_backtest_demo(client):
     assert res["initial"] == 3000
     assert res["trade_count"] >= 0
     assert len(res["equity_curve"]) > 0
+
+
+def test_backtest_atr_exit_mode(client):
+    r = client.post("/backtest", json={"demo": True, "days": 60, "exit_mode": "atr"})
+    assert r.status_code == 200
+    res = r.json()
+    assert res["exit_mode"] == "atr"
+    for key in ("take_profit_count", "stop_loss_count", "signal_exit_count",
+                "avg_holding_days", "risk_reward"):
+        assert key in res

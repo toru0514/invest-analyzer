@@ -29,6 +29,8 @@ DEFAULT_CONFIGS: list[dict[str, Any]] = [
     {"rule_type": "bbands", "params": {"length": 20, "std": 2.0}, "weight": 1, "enabled": 1},
     {"rule_type": "stoch", "params": {"k": 14, "d": 3, "low": 20, "high": 80}, "weight": 1, "enabled": 1},
     {"rule_type": "candle_pattern", "params": {}, "weight": 1, "enabled": 1},
+    # 乖離率（移動平均からの乖離%）。MA より大きく下なら売られすぎ→買い、上なら買われすぎ→売り。
+    {"rule_type": "disparity", "params": {"ma": 25, "low": -7, "high": 7}, "weight": 1, "enabled": 1},
     # 追補版の強化（B/C/D）。スコアを多面的に補正する。
     {"rule_type": "volume_filter", "params": {"sma": 20, "surge": 1.5, "quiet": 0.7, "bonus": 1}, "weight": 1, "enabled": 1},
     {"rule_type": "weekly_trend_filter", "params": {"sma": 13, "mode": "penalty"}, "weight": 1, "enabled": 1},
@@ -249,6 +251,19 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[
                 score += w; detail["engulfing"] = +w
             elif eng < 0:
                 score -= w; detail["engulfing"] = -w
+
+        elif rt == "disparity":
+            # 乖離率 = (終値 - MA) / MA * 100。MA から大きく下＝売られすぎ→買い、上＝買われすぎ→売り。
+            ma_len = int(p.get("ma", 25))
+            ma = _sma(df["close"], ma_len).iloc[-1]
+            cur_close = _val(df, "close", -1)
+            if pd.isna(ma) or ma == 0 or cur_close is None:
+                continue
+            disp = (cur_close - ma) / ma * 100
+            if disp <= p.get("low", -7):
+                score += w; detail["disparity"] = +w
+            elif disp >= p.get("high", 7):
+                score -= w; detail["disparity"] = -w
 
         elif rt == "price_target":
             # スコアとは別経路（即通知）。バックテストのスコアには算入しない。

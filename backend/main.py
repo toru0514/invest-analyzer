@@ -70,6 +70,7 @@ class BacktestIn(BaseModel):
     days: int = 22
     demo: bool = False
     persist: bool = False
+    exit_mode: str = "score"   # "score"（スコア反転で決済）/ "atr"（ATR出口入り・強化J）
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +360,8 @@ def backtest(payload: BacktestIn):
     result = run_backtest(histories, configs=common,
                           initial_capital=payload.initial_capital,
                           backtest_days=payload.days,
-                          buy_threshold=buy_th, sell_threshold=sell_th)
+                          buy_threshold=buy_th, sell_threshold=sell_th,
+                          exit_mode=payload.exit_mode)
     result["failed"] = failed
 
     if payload.persist:

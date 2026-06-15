@@ -19,6 +19,7 @@ export default function Simulation() {
   const [days, setDays] = useState(22);
   const [demo, setDemo] = useState(true);
   const [persist, setPersist] = useState(false);
+  const [atrExit, setAtrExit] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +28,10 @@ export default function Simulation() {
     setLoading(true);
     setError(null);
     try {
-      const r = await api.backtest({ initial_capital: capital, days, demo, persist });
+      const r = await api.backtest({
+        initial_capital: capital, days, demo, persist,
+        exit_mode: atrExit ? "atr" : "score",
+      });
       setResult(r);
     } catch (e) {
       setError(String(e));
@@ -68,6 +72,10 @@ export default function Simulation() {
             <input type="checkbox" checked={persist} onChange={(e) => setPersist(e.target.checked)} />
             取引を記録（paper_trades）
           </label>
+          <label className="flex items-center gap-1">
+            <input type="checkbox" checked={atrExit} onChange={(e) => setAtrExit(e.target.checked)} />
+            ATR出口ルールを使う（押し目指値＋損切/利確）
+          </label>
           <button
             onClick={run}
             disabled={loading}
@@ -78,6 +86,9 @@ export default function Simulation() {
         </div>
         <p className="mt-2 text-xs text-slate-500">
           watchlist の有効銘柄を対象に、過去データで端株（小数株）を許容して売買を再現します。未来データは使いません。
+          {atrExit
+            ? "（ATR出口: ハーフATRの押し目で約定し、損切/利確ラインまたは逆シグナルで決済）"
+            : "（既定: スコアが反転したら決済）"}
         </p>
       </section>
 
@@ -103,6 +114,19 @@ export default function Simulation() {
             <Metric label="勝率" value={result.win_rate == null ? "N/A" : `${result.win_rate.toFixed(1)}%`} />
             <Metric label="最大ドローダウン" value={`${result.max_drawdown_pct.toFixed(2)}%`} />
           </section>
+
+          {result.exit_mode === "atr" && (
+            <section className="mb-6">
+              <h2 className="mb-2 text-sm font-semibold text-slate-600">ATR出口の内訳（強化J）</h2>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                <Metric label="利確で決済" value={`${result.take_profit_count ?? 0} 回`} />
+                <Metric label="損切で決済" value={`${result.stop_loss_count ?? 0} 回`} />
+                <Metric label="逆シグナルで決済" value={`${result.signal_exit_count ?? 0} 回`} />
+                <Metric label="平均保有日数" value={result.avg_holding_days == null ? "N/A" : `${result.avg_holding_days.toFixed(1)} 日`} />
+                <Metric label="リスクリワード実績" value={result.risk_reward == null ? "N/A" : `${result.risk_reward.toFixed(2)} : 1`} />
+              </div>
+            </section>
+          )}
 
           <section className="mb-6 rounded border bg-white p-4">
             <h2 className="mb-3 font-semibold">資産推移</h2>
