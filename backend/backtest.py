@@ -9,8 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-import signals as signals_mod
-from signals import DEFAULT_CONFIGS, evaluate
+from signals import BUY_THRESHOLD, DEFAULT_CONFIGS, SELL_THRESHOLD, evaluate
 
 INITIAL_CAPITAL = 3000.0   # 仮想資金（円）
 BACKTEST_DAYS = 22         # 評価営業日数（≒1ヶ月）
@@ -23,6 +22,8 @@ def run_backtest(
     initial_capital: float = INITIAL_CAPITAL,
     backtest_days: int = BACKTEST_DAYS,
     warmup_days: int = WARMUP_DAYS,
+    buy_threshold: int = BUY_THRESHOLD,
+    sell_threshold: int = SELL_THRESHOLD,
 ) -> dict:
     if configs is None:
         configs = DEFAULT_CONFIGS
@@ -46,7 +47,7 @@ def run_backtest(
             window = df[df.index <= d]
             if len(window) < warmup_days:
                 continue
-            score, direction, detail = evaluate(window, configs)
+            score, direction, detail = evaluate(window, configs, buy_threshold, sell_threshold)
             price = float(window["close"].iloc[-1])
 
             if direction == "buy" and cash > 0:
@@ -82,7 +83,7 @@ def run_backtest(
     for ticker, df in histories.items():
         last_close = float(df["close"].iloc[-1])
         final_value += holdings[ticker] * last_close
-        score, direction, detail = evaluate(df, configs)
+        score, direction, detail = evaluate(df, configs, buy_threshold, sell_threshold)
         signal_rows.append({"ticker": ticker, "price": last_close,
                             "score": score, "direction": direction, "detail": detail})
 

@@ -37,8 +37,12 @@ export default function Dashboard() {
   async function load() {
     setError(null);
     try {
-      const [watch, signals] = await Promise.all([api.getWatchlist(), api.getSignals(undefined, 500)]);
-      setRows(mergeRows(watch, signals));
+      const [watch, signals, latest] = await Promise.all([
+        api.getWatchlist(),
+        api.getSignals(undefined, 500),
+        api.getLatestPrices(),
+      ]);
+      setRows(mergeRows(watch, signals, latest));
     } catch (e) {
       setError(String(e));
     }
@@ -171,18 +175,23 @@ export default function Dashboard() {
   );
 }
 
-function mergeRows(watch: WatchItem[], signals: Signal[]): Row[] {
+function mergeRows(
+  watch: WatchItem[],
+  signals: Signal[],
+  prices: Record<string, { date: string; close: number }> = {},
+): Row[] {
   const latest = new Map<string, Signal>();
   for (const s of signals) {
     if (!latest.has(s.ticker)) latest.set(s.ticker, s); // signals は新しい順
   }
   return watch.map((w) => {
     const s = latest.get(w.ticker);
+    const p = prices[w.ticker];
     return {
       id: w.id,
       ticker: w.ticker,
       name: w.name,
-      price: null,
+      price: p ? p.close : null,
       score: s ? s.score : null,
       direction: s ? s.direction : null,
       date: s ? s.date : null,
