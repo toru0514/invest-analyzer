@@ -1,7 +1,20 @@
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# SQLite（Phase 1 以降）
+data.db
+*.db
+
+# Next.js（Phase 3 以降）
 node_modules
 .next
 out
+next-env.d.ts
+
+# OS / ログ / 環境変数
 .DS_Store
 *.log
 .env*
-next-env.d.ts
