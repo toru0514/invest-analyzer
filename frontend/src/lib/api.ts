@@ -88,6 +88,13 @@ export type BacktestResult = {
   trades: { date: string; ticker: string; action: string; price: number; shares: number }[];
   signals: { ticker: string; price: number; score: number; direction: Direction; detail: Record<string, number | string> }[];
   equity_curve: { date: string; equity: number }[];
+  exit_mode?: "score" | "atr";
+  // exit_mode === "atr"（出口入りシミュレーション・強化J）でのみ返る追加成績
+  take_profit_count?: number;
+  stop_loss_count?: number;
+  signal_exit_count?: number;
+  avg_holding_days?: number | null;
+  risk_reward?: number | null;
   failed?: string[];
 };
 
@@ -137,7 +144,7 @@ export const api = {
     req<{ updated: RefreshRow[]; failed: string[]; note: string | null }>(
       `/refresh?demo=${demo}`, { method: "POST" }),
 
-  backtest: (body: { tickers?: string[]; initial_capital?: number; days?: number; demo?: boolean; persist?: boolean }) =>
+  backtest: (body: { tickers?: string[]; initial_capital?: number; days?: number; demo?: boolean; persist?: boolean; exit_mode?: "score" | "atr" }) =>
     req<BacktestResult>("/backtest", { method: "POST", body: JSON.stringify(body) }),
 
   getPlan: (date?: string) =>

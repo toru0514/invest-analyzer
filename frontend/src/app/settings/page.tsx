@@ -11,6 +11,7 @@ const RULE_LABELS: Record<string, string> = {
   bbands: "ボリンジャーバンド",
   stoch: "ストキャスティクス",
   candle_pattern: "ローソク足パターン（赤三兵/三羽烏/包み足）",
+  disparity: "乖離率（移動平均からの乖離%）",
   volume_filter: "出来高フィルター（ダマシ低減）",
   weekly_trend_filter: "週足トレンド足切り（逆張り事故低減）",
   atr_exit: "ATR出口設計（損切/利確・提案指値）",
@@ -45,6 +46,11 @@ const PARAM_FIELDS: Record<string, ParamField[]> = {
     { key: "high", label: "買われすぎ" },
   ],
   candle_pattern: [],
+  disparity: [
+    { key: "ma", label: "MA期間" },
+    { key: "low", label: "売られすぎ%" },
+    { key: "high", label: "買われすぎ%" },
+  ],
   volume_filter: [
     { key: "sma", label: "平均期間" },
     { key: "surge", label: "急増(倍)", step: 0.1 },

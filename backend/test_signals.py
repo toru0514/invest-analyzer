@@ -113,6 +113,34 @@ def test_build_plan_exits_are_ordered():
     assert sell["target_price"] < close < sell["stop_price"]
 
 
+def test_disparity_votes_buy_when_far_below_ma():
+    import numpy as np
+    import pandas as pd
+    # 高値圏からの急落で、終値が MA25 から大きく下に乖離する状況を作る。
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-15"), periods=60)
+    close = np.concatenate([np.full(55, 1000.0), np.linspace(1000, 800, 5)])
+    df = pd.DataFrame({"open": close, "high": close + 2, "low": close - 2,
+                       "close": close, "volume": 1_000_000.0}, index=idx)
+    cfg = [{"rule_type": "disparity", "params": {"ma": 25, "low": -7, "high": 7},
+            "weight": 1, "enabled": 1}]
+    df_ind = signals.add_indicators(df)
+    score, detail = signals._score_indicators(df_ind, cfg)
+    assert detail.get("disparity") == 1 and score == 1
+
+
+def test_atr_exit_backtest_has_extra_metrics():
+    hist = {tk: synthetic_history(tk, seed=i)
+            for i, tk in enumerate(["8306.T", "7203.T", "9984.T", "6758.T"])}
+    r = run_backtest(hist, exit_mode="atr")
+    assert r["exit_mode"] == "atr"
+    for key in ("take_profit_count", "stop_loss_count", "signal_exit_count",
+                "avg_holding_days", "risk_reward", "equity_curve"):
+        assert key in r
+    # 決済回数の内訳は closed_trades と整合する
+    assert (r["take_profit_count"] + r["stop_loss_count"] + r["signal_exit_count"]
+            == r["closed_trades"])
+
+
 if __name__ == "__main__":
     test_evaluate_returns_valid_direction()
     test_golden_dead_cross_are_exclusive()
@@ -122,4 +150,6 @@ if __name__ == "__main__":
     test_volume_ratio_and_filter_bonus()
     test_weekly_trend_block_suppresses_counter_trend()
     test_build_plan_exits_are_ordered()
+    test_disparity_votes_buy_when_far_below_ma()
+    test_atr_exit_backtest_has_extra_metrics()
     print("all smoke tests passed")
