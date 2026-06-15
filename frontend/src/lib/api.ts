@@ -59,6 +59,23 @@ export type Candle = {
   volume: number;
 };
 
+export type PlanRow = {
+  id: number;
+  ticker: string;
+  plan_date: string;
+  direction: Direction;
+  score: number;
+  vol_ratio: number | null;
+  weekly_trend: "up" | "down" | "flat" | null;
+  limit_price: number | null;
+  stop_price: number | null;
+  target_price: number | null;
+  rationale: string | null;
+  created_at: string;
+};
+
+export type PlanResponse = { plan_date: string | null; rows: PlanRow[]; failed?: string[] };
+
 export type BacktestResult = {
   initial: number;
   final: number;
@@ -122,4 +139,9 @@ export const api = {
 
   backtest: (body: { tickers?: string[]; initial_capital?: number; days?: number; demo?: boolean; persist?: boolean }) =>
     req<BacktestResult>("/backtest", { method: "POST", body: JSON.stringify(body) }),
+
+  getPlan: (date?: string) =>
+    req<PlanResponse>(`/plan${date ? `?date=${encodeURIComponent(date)}` : ""}`),
+  generatePlan: (demo: boolean) =>
+    req<PlanResponse>(`/plan/generate?demo=${demo}`, { method: "POST" }),
 };

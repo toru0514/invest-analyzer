@@ -51,7 +51,8 @@ def test_watchlist_crud(client):
 def test_config_crud_and_price_target(client):
     configs = client.get("/config").json()
     indicators = [c for c in configs if c["rule_type"] != "price_target"]
-    assert len(indicators) == 6  # 既定の6指標
+    # 既定: 状態ベース6指標 + 追補版3フィルター（volume/weekly/atr）= 9
+    assert len(indicators) == 9
 
     # 重み更新
     target = indicators[0]
@@ -127,6 +128,23 @@ def test_unnotified_and_mark_notified(client):
     assert all(s["id"] not in ids for s in after)
 
     client.delete(f"/config/{pt_id}")
+
+
+def test_plan_generate_and_get(client):
+    gen = client.post("/plan/generate?demo=true").json()
+    assert gen["failed"] == []
+    assert gen["plan_date"]
+    assert len(gen["rows"]) == 4   # 監視4銘柄ぶん
+
+    got = client.get("/plan").json()
+    assert got["plan_date"] == gen["plan_date"]
+    tickers = {r["ticker"] for r in got["rows"]}
+    assert "8306.T" in tickers
+    # buy/sell の行は提案指値・出口が埋まっている
+    for r in got["rows"]:
+        if r["direction"] in ("buy", "sell"):
+            assert r["limit_price"] is not None
+            assert r["stop_price"] is not None and r["target_price"] is not None
 
 
 def test_backtest_demo(client):

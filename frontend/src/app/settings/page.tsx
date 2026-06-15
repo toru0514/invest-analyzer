@@ -11,11 +11,14 @@ const RULE_LABELS: Record<string, string> = {
   bbands: "ボリンジャーバンド",
   stoch: "ストキャスティクス",
   candle_pattern: "ローソク足パターン（赤三兵/三羽烏/包み足）",
+  volume_filter: "出来高フィルター（ダマシ低減）",
+  weekly_trend_filter: "週足トレンド足切り（逆張り事故低減）",
+  atr_exit: "ATR出口設計（損切/利確・提案指値）",
   price_target: "指定金額アラート",
 };
 
 // 指標ごとに編集できる params 定義（RSI の 30/70、MA の期間など）
-type ParamField = { key: string; label: string; step?: number };
+type ParamField = { key: string; label: string; step?: number; options?: { value: string; label: string }[] };
 const PARAM_FIELDS: Record<string, ParamField[]> = {
   rsi: [
     { key: "length", label: "期間" },
@@ -42,6 +45,30 @@ const PARAM_FIELDS: Record<string, ParamField[]> = {
     { key: "high", label: "買われすぎ" },
   ],
   candle_pattern: [],
+  volume_filter: [
+    { key: "sma", label: "平均期間" },
+    { key: "surge", label: "急増(倍)", step: 0.1 },
+    { key: "quiet", label: "閑散(倍)", step: 0.1 },
+    { key: "bonus", label: "ボーナス" },
+  ],
+  weekly_trend_filter: [
+    { key: "sma", label: "週足SMA" },
+    { key: "mode", label: "モード", options: [
+      { value: "penalty", label: "減点" },
+      { value: "block", label: "無効化" },
+    ] },
+  ],
+  atr_exit: [
+    { key: "length", label: "ATR期間" },
+    { key: "stop_mult", label: "損切×", step: 0.1 },
+    { key: "target_mult", label: "利確×", step: 0.1 },
+    { key: "limit_method", label: "指値方式", options: [
+      { value: "support", label: "サポート" },
+      { value: "ma", label: "移動平均" },
+      { value: "atr", label: "ATR" },
+    ] },
+    { key: "support_n", label: "ｻﾎﾟｰﾄ期間" },
+  ],
 };
 
 export default function Settings() {
@@ -101,7 +128,7 @@ export default function Settings() {
     setConfigs((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   }
 
-  function setParam(id: number, key: string, value: number) {
+  function setParam(id: number, key: string, value: number | string) {
     setConfigs((cs) =>
       cs.map((c) => (c.id === id ? { ...c, params: { ...c.params, [key]: value } } : c)),
     );
@@ -301,13 +328,27 @@ export default function Settings() {
                     {(PARAM_FIELDS[c.rule_type] ?? []).map((f) => (
                       <label key={f.key} className="flex items-center gap-1 text-xs text-slate-600">
                         {f.label}
-                        <input
-                          type="number"
-                          step={f.step ?? 1}
-                          value={Number(c.params?.[f.key] ?? 0)}
-                          onChange={(e) => setParam(c.id, f.key, Number(e.target.value))}
-                          className="w-16 rounded border px-2 py-0.5"
-                        />
+                        {f.options ? (
+                          <select
+                            value={String(c.params?.[f.key] ?? f.options[0].value)}
+                            onChange={(e) => setParam(c.id, f.key, e.target.value)}
+                            className="rounded border px-2 py-0.5"
+                          >
+                            {f.options.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="number"
+                            step={f.step ?? 1}
+                            value={Number(c.params?.[f.key] ?? 0)}
+                            onChange={(e) => setParam(c.id, f.key, Number(e.target.value))}
+                            className="w-16 rounded border px-2 py-0.5"
+                          />
+                        )}
                       </label>
                     ))}
                     {(PARAM_FIELDS[c.rule_type] ?? []).length === 0 && (

@@ -17,7 +17,7 @@ import db
 from backtest import run_backtest
 from market import get_history
 from scheduler import DailyScheduler
-from signals import evaluate
+from signals import build_plan, evaluate
 
 _scheduler: DailyScheduler | None = None
 
@@ -243,6 +243,16 @@ def _check_price_targets(ticker: str, last_close: float, configs: list[dict]):
     return None
 
 
+def _next_business_day(date_str: str) -> str:
+    """YYYY-MM-DD の翌営業日（土日スキップ）を返す。"""
+    import datetime as _dt
+    d = _dt.date.fromisoformat(date_str)
+    d += _dt.timedelta(days=1)
+    while d.weekday() >= 5:   # 土(5)/日(6)
+        d += _dt.timedelta(days=1)
+    return d.isoformat()
+
+
 def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
     """最新データ取得 + 再判定（全 enabled 銘柄）の中核。
 
@@ -276,16 +286,45 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
             db.insert_signal(ticker, date, score, pt_dir, {**detail, **pt_detail})
 
         sid = db.insert_signal(ticker, date, score, direction, detail)
+
+        # 作戦ボード（強化4）: 翌営業日の提案指値・出口を生成して保存
+        plan = build_plan(df, direction, score, ticker_cfgs)
+        plan_date = _next_business_day(date)
+        db.upsert_plan({
+            "ticker": ticker, "plan_date": plan_date, "direction": direction, "score": score,
+            "vol_ratio": detail.get("vol_ratio"), "weekly_trend": detail.get("weekly_trend"),
+            "limit_price": plan["limit_price"], "stop_price": plan["stop_price"],
+            "target_price": plan["target_price"], "rationale": plan["rationale"],
+        })
+
         results.append({"id": sid, "ticker": ticker, "date": date, "price": last_close,
                         "score": score, "direction": direction, "detail": detail})
 
-    return {"updated": results, "failed": failed,
+    plan_date = _next_business_day(results[-1]["date"]) if results else None
+    return {"updated": results, "failed": failed, "plan_date": plan_date,
             "note": "yfinance 取得失敗時は demo=true で合成データを使えます。" if failed else None}
 
 
 @app.post("/refresh")
 def refresh(demo: bool = Query(False), period: str = Query("6mo")):
     return perform_refresh(demo=demo, period=period)
+
+
+# ---------------------------------------------------------------------------
+# 作戦ボード（強化4）
+# ---------------------------------------------------------------------------
+@app.get("/plan")
+def get_plan(date: Optional[str] = Query(None)):
+    """指定日（省略時は最新）の作戦ボードを返す。"""
+    return {"plan_date": date or db.latest_plan_date(), "rows": db.list_plan(date)}
+
+
+@app.post("/plan/generate")
+def post_plan_generate(demo: bool = Query(False)):
+    """全 enabled 銘柄の作戦ボードを生成・保存（refresh と同じ処理を走らせる）。"""
+    res = perform_refresh(demo=demo)
+    return {"plan_date": res["plan_date"], "rows": db.list_plan(res["plan_date"]),
+            "failed": res["failed"]}
 
 
 # ---------------------------------------------------------------------------
