@@ -18,3 +18,5 @@ next-env.d.ts
 .DS_Store
 *.log
 .env*
+!*.env.local.example
+!.env.local.example
