@@ -203,7 +203,41 @@ export default function Settings() {
     await load();
   }
 
-  const indicatorConfigs = configs.filter((c) => c.rule_type !== "price_target");
+  // ---- 銘柄別 ATR 出口（オーバーライド） ----
+  const globalAtr = configs.find((c) => c.rule_type === "atr_exit" && c.ticker === null);
+  const tickerExits = new Map(
+    configs.filter((c) => c.rule_type === "atr_exit" && c.ticker !== null).map((c) => [c.ticker as string, c]),
+  );
+
+  async function addTickerExit(ticker: string) {
+    const base = (globalAtr?.params ?? {
+      length: 14, stop_mult: 1.5, target_mult: 1.5, limit_method: "support", support_n: 20,
+    }) as Record<string, unknown>;
+    try {
+      await api.addConfig({ rule_type: "atr_exit", ticker, params: { ...base } });
+      flash(`${ticker} の個別出口を追加しました。`);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function saveTickerExit(c: SignalConfig) {
+    try {
+      await api.updateConfig([{ id: c.id, params: c.params }]);
+      flash(`${c.ticker} の個別出口を保存しました。`);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function removeTickerExit(id: number) {
+    await api.deleteConfig(id);
+    await load();
+  }
+
+  const indicatorConfigs = configs.filter((c) => c.rule_type !== "price_target" && c.ticker === null);
   const priceTargets = configs.filter((c) => c.rule_type === "price_target");
 
   return (
@@ -392,6 +426,65 @@ export default function Settings() {
         <p className="mt-3 text-xs text-slate-500">
           状態ベースのスコアです：トレンド系（MA/MACD）が常時 ±重み、逆張り系（RSI/ストキャス/BB）が
           売られすぎ/買われすぎで加点。合計が上の閾値を超えると買い/売り判定になります。
+        </p>
+      </section>
+
+      {/* 銘柄別 ATR 出口（オーバーライド） */}
+      <section className="mb-8 rounded border bg-white p-4">
+        <h2 className="mb-1 font-semibold">銘柄別の出口設定（ATR・任意）</h2>
+        <p className="mb-3 text-xs text-slate-500">
+          スイングは「数日〜1週間」が基本。利確×を小さくすると近め（短期・高回転）、大きくすると遠め（トレンド追随）。
+          銘柄ごとに動きが違うので、個別に上書きできます。未設定の銘柄は全銘柄共通（利確×{String(globalAtr?.params?.target_mult ?? 1.5)} / 損切×{String(globalAtr?.params?.stop_mult ?? 1.5)}）を使います。
+        </p>
+        <ul className="divide-y text-sm">
+          {watch.map((w) => {
+            const ov = tickerExits.get(w.ticker);
+            return (
+              <li key={w.id} className="flex flex-wrap items-center gap-3 py-2">
+                <span className="w-44 shrink-0">
+                  <span className="font-mono">{w.ticker}</span>{" "}
+                  <span className="text-slate-500">{w.name}</span>
+                </span>
+                {ov ? (
+                  <>
+                    <label className="flex items-center gap-1 text-xs text-slate-600">
+                      利確×
+                      <input type="number" step={0.1} value={Number(ov.params?.target_mult ?? 1.5)}
+                        onChange={(e) => setParam(ov.id, "target_mult", Number(e.target.value))}
+                        className="w-16 rounded border px-2 py-0.5" />
+                    </label>
+                    <label className="flex items-center gap-1 text-xs text-slate-600">
+                      損切×
+                      <input type="number" step={0.1} value={Number(ov.params?.stop_mult ?? 1.5)}
+                        onChange={(e) => setParam(ov.id, "stop_mult", Number(e.target.value))}
+                        className="w-16 rounded border px-2 py-0.5" />
+                    </label>
+                    <label className="flex items-center gap-1 text-xs text-slate-600">
+                      指値方式
+                      <select value={String(ov.params?.limit_method ?? "support")}
+                        onChange={(e) => setParam(ov.id, "limit_method", e.target.value)}
+                        className="rounded border px-2 py-0.5">
+                        <option value="support">サポート</option>
+                        <option value="ma">移動平均</option>
+                        <option value="atr">ATR</option>
+                      </select>
+                    </label>
+                    <button onClick={() => saveTickerExit(ov)} className="rounded bg-green-600 px-2 py-0.5 text-xs text-white hover:bg-green-700">保存</button>
+                    <button onClick={() => removeTickerExit(ov.id)} className="text-xs text-red-600 hover:underline">共通に戻す</button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xs text-slate-400">全銘柄共通を使用中</span>
+                    <button onClick={() => addTickerExit(w.ticker)} className="rounded border px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-50">個別に設定</button>
+                  </>
+                )}
+              </li>
+            );
+          })}
+          {watch.length === 0 && <li className="py-2 text-slate-500">銘柄がありません。</li>}
+        </ul>
+        <p className="mt-3 text-xs text-slate-500">
+          ここの設定は作戦ボードの提案指値・利確/損切に反映されます（シミュレーションは全銘柄共通設定を使用）。
         </p>
       </section>
 
