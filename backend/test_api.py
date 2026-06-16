@@ -147,6 +147,26 @@ def test_plan_generate_and_get(client):
             assert r["stop_price"] is not None and r["target_price"] is not None
 
 
+def test_holdings_crud(client):
+    assert client.get("/holdings").json() == []
+    client.put("/holdings", json={"ticker": "8306.T", "shares": 100, "avg_cost": 3210})
+    hs = client.get("/holdings").json()
+    assert len(hs) == 1 and hs[0]["ticker"] == "8306.T" and hs[0]["shares"] == 100
+
+    # 上書き
+    client.put("/holdings", json={"ticker": "8306.T", "shares": 150, "avg_cost": 3180})
+    assert client.get("/holdings").json()[0]["shares"] == 150
+
+    # shares<=0 は保有解除
+    client.put("/holdings", json={"ticker": "8306.T", "shares": 0, "avg_cost": 3180})
+    assert client.get("/holdings").json() == []
+
+    # DELETE エンドポイント
+    client.put("/holdings", json={"ticker": "7203.T", "shares": 50, "avg_cost": 2800})
+    client.delete("/holdings/7203.T")
+    assert client.get("/holdings").json() == []
+
+
 def test_backtest_demo(client):
     r = client.post("/backtest", json={"demo": True, "days": 60, "initial_capital": 3000})
     assert r.status_code == 200

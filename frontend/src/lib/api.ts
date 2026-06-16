@@ -77,6 +77,8 @@ export type PlanRow = {
 
 export type PlanResponse = { plan_date: string | null; rows: PlanRow[]; failed?: string[] };
 
+export type Holding = { ticker: string; shares: number; avg_cost: number };
+
 export type SweepRow = {
   threshold: number;
   exit_mode: "score" | "atr";
@@ -174,4 +176,10 @@ export const api = {
 
   optimize: (body: { days?: number; demo?: boolean; tickers?: string[] }) =>
     req<OptimizeResponse>("/optimize", { method: "POST", body: JSON.stringify(body) }),
+
+  getHoldings: () => req<Holding[]>("/holdings"),
+  saveHolding: (b: { ticker: string; shares: number; avg_cost: number }) =>
+    req<unknown>("/holdings", { method: "PUT", body: JSON.stringify(b) }),
+  deleteHolding: (ticker: string) =>
+    req<{ deleted: string }>(`/holdings/${encodeURIComponent(ticker)}`, { method: "DELETE" }),
 };
