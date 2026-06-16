@@ -109,8 +109,26 @@ def test_build_plan_exits_are_ordered():
     buy = signals.build_plan(df, "buy", 3)
     assert buy["atr"] is not None
     assert buy["stop_price"] < close < buy["target_price"]
+    # 既定の買い指値（5日線方式）は現値より上に置かない（押し目買い）
+    assert buy["limit_price"] <= close
     sell = signals.build_plan(df, "sell", -3)
     assert sell["target_price"] < close < sell["stop_price"]
+    assert sell["limit_price"] >= close   # 戻り売りは現値より下に置かない
+
+
+def test_build_plan_limit_method_switch():
+    df = synthetic_history("TEST.T", n=120, seed=7)
+    common = [{"rule_type": "atr_exit", "weight": 1, "enabled": 1, "params": {
+        "length": 14, "stop_mult": 1.5, "target_mult": 1.5, "support_n": 20,
+        "limit_ma": 5, "entry_atr_mult": 0.5, "limit_method": "ma"}}]
+
+    def limit(method):
+        cfg = [dict(common[0], params={**common[0]["params"], "limit_method": method})]
+        return signals.build_plan(df, "buy", 3, cfg)["limit_price"]
+
+    # 方式で値が変わる。ma と atr は現値寄り、support（20日安値）は最も低い。
+    ma, atr, support = limit("ma"), limit("atr"), limit("support")
+    assert support <= ma and support <= atr
 
 
 def test_disparity_votes_buy_when_far_below_ma():
@@ -195,6 +213,7 @@ if __name__ == "__main__":
     test_volume_ratio_and_filter_bonus()
     test_weekly_trend_block_suppresses_counter_trend()
     test_build_plan_exits_are_ordered()
+    test_build_plan_limit_method_switch()
     test_disparity_votes_buy_when_far_below_ma()
     test_obv_votes_with_volume_trend()
     test_cci_votes_buy_when_oversold()

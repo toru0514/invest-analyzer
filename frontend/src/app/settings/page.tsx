@@ -77,11 +77,12 @@ const PARAM_FIELDS: Record<string, ParamField[]> = {
     { key: "stop_mult", label: "損切×", step: 0.1 },
     { key: "target_mult", label: "利確×", step: 0.1 },
     { key: "limit_method", label: "指値方式", options: [
-      { value: "support", label: "サポート" },
       { value: "ma", label: "移動平均" },
-      { value: "atr", label: "ATR" },
+      { value: "atr", label: "ATR押し目" },
+      { value: "support", label: "サポート" },
     ] },
-    { key: "support_n", label: "ｻﾎﾟｰﾄ期間" },
+    { key: "limit_ma", label: "指値MA期間" },
+    { key: "entry_atr_mult", label: "ATR押し目×", step: 0.1 },
   ],
 };
 
@@ -464,9 +465,9 @@ export default function Settings() {
                       <select value={String(ov.params?.limit_method ?? "support")}
                         onChange={(e) => setParam(ov.id, "limit_method", e.target.value)}
                         className="rounded border px-2 py-0.5">
-                        <option value="support">サポート</option>
                         <option value="ma">移動平均</option>
-                        <option value="atr">ATR</option>
+                        <option value="atr">ATR押し目</option>
+                        <option value="support">サポート</option>
                       </select>
                     </label>
                     <button onClick={() => saveTickerExit(ov)} className="rounded bg-green-600 px-2 py-0.5 text-xs text-white hover:bg-green-700">保存</button>

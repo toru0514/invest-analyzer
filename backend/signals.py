@@ -38,7 +38,7 @@ DEFAULT_CONFIGS: list[dict[str, Any]] = [
     # 追補版の強化（B/C/D）。スコアを多面的に補正する。
     {"rule_type": "volume_filter", "params": {"sma": 20, "surge": 1.5, "quiet": 0.7, "bonus": 1}, "weight": 1, "enabled": 1},
     {"rule_type": "weekly_trend_filter", "params": {"sma": 13, "mode": "penalty"}, "weight": 1, "enabled": 1},
-    {"rule_type": "atr_exit", "params": {"length": 14, "stop_mult": 1.5, "target_mult": 1.5, "limit_method": "support", "support_n": 20}, "weight": 1, "enabled": 1},
+    {"rule_type": "atr_exit", "params": {"length": 14, "stop_mult": 1.5, "target_mult": 1.5, "limit_method": "ma", "limit_ma": 5, "entry_atr_mult": 0.5, "support_n": 20}, "weight": 1, "enabled": 1},
     # price_target はスコアと独立した「即通知」経路。バックテストのスコアには算入しない。
     # {"rule_type": "price_target", "params": {"above": 1500}, "weight": 1, "enabled": 1},
 ]
@@ -412,9 +412,11 @@ def build_plan(df: pd.DataFrame, direction: str, score: int,
     p = _find_cfg(configs, "atr_exit") or {}
     length = int(p.get("length", 14))
     stop_mult = float(p.get("stop_mult", 1.5))
-    target_mult = float(p.get("target_mult", 2.0))
-    method = p.get("limit_method", "support")
+    target_mult = float(p.get("target_mult", 1.5))
+    method = p.get("limit_method", "ma")
     support_n = int(p.get("support_n", 20))
+    limit_ma = int(p.get("limit_ma", 5))          # 指値方式=ma で使う移動平均の期間
+    entry_atr_mult = float(p.get("entry_atr_mult", 0.5))  # 指値方式=atr の押し目の深さ
 
     close = float(df["close"].iloc[-1])
     atr = atr_value(df, length)
@@ -423,31 +425,31 @@ def build_plan(df: pd.DataFrame, direction: str, score: int,
     if direction not in ("buy", "sell") or atr is None:
         return out
 
-    ma_short = _sma_last(df["close"], 5)
-    ma_long = _sma_last(df["close"], 25)
+    ma = _sma_last(df["close"], limit_ma)
+    ma_val = ma if ma is not None else close
 
     if direction == "buy":
         out["stop_price"] = close - stop_mult * atr
         out["target_price"] = close + target_mult * atr
         support = float(df["low"].rolling(support_n).min().iloc[-1])
-        atr_basis = close - 0.5 * atr
+        atr_basis = close - entry_atr_mult * atr
         candidates = {"support": support * 1.003,
-                      "ma": ma_short if ma_short is not None else close,
+                      "ma": min(ma_val, close),     # 押し目買い: 現値より上には置かない
                       "atr": atr_basis}
-        out["limit_price"] = candidates.get(method, candidates["support"])
+        out["limit_price"] = candidates.get(method, candidates["ma"])
         out["rationale"] = (
-            f"サポート{support:.0f} / 5日線{(ma_short or 0):.0f} / ATR基準{atr_basis:.0f}"
+            f"{limit_ma}日線{ma_val:.0f} / ATR押し目{atr_basis:.0f} / サポート{support:.0f}"
             f"（方式: {method}）")
     else:  # sell
         out["stop_price"] = close + stop_mult * atr
         out["target_price"] = close - target_mult * atr
         resistance = float(df["high"].rolling(support_n).max().iloc[-1])
-        atr_basis = close + 0.5 * atr
+        atr_basis = close + entry_atr_mult * atr
         candidates = {"support": resistance * 0.997,
-                      "ma": ma_short if ma_short is not None else close,
+                      "ma": max(ma_val, close),     # 戻り売り: 現値より下には置かない
                       "atr": atr_basis}
-        out["limit_price"] = candidates.get(method, candidates["support"])
+        out["limit_price"] = candidates.get(method, candidates["ma"])
         out["rationale"] = (
-            f"レジスタンス{resistance:.0f} / 5日線{(ma_short or 0):.0f} / ATR基準{atr_basis:.0f}"
+            f"{limit_ma}日線{ma_val:.0f} / ATR戻り{atr_basis:.0f} / レジスタンス{resistance:.0f}"
             f"（方式: {method}・成行も可）")
     return out
