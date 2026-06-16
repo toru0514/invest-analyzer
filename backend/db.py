@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS app_meta (
   value TEXT
 );
 
+-- 保有ポジション（取得単価・株数）。作戦ボードで含み損益を表示するため。
+CREATE TABLE IF NOT EXISTS holdings (
+  ticker     TEXT PRIMARY KEY,
+  shares     REAL NOT NULL,
+  avg_cost   REAL NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- 作戦ボード（追補版 強化4）: 翌営業日の判定・提案指値・出口
 CREATE TABLE IF NOT EXISTS daily_plan (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -359,6 +367,28 @@ def list_paper_trades(ticker=None):
     q += " ORDER BY date, id"
     with get_conn() as conn:
         return [dict(r) for r in conn.execute(q, params).fetchall()]
+
+
+# ---- holdings（保有ポジション） ----
+def list_holdings():
+    with get_conn() as conn:
+        rows = conn.execute("SELECT ticker, shares, avg_cost FROM holdings ORDER BY ticker").fetchall()
+    return [dict(r) for r in rows]
+
+
+def upsert_holding(ticker: str, shares: float, avg_cost: float):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO holdings (ticker, shares, avg_cost, updated_at) "
+            "VALUES (?, ?, ?, datetime('now')) "
+            "ON CONFLICT(ticker) DO UPDATE SET "
+            "shares=excluded.shares, avg_cost=excluded.avg_cost, updated_at=datetime('now')",
+            (ticker, float(shares), float(avg_cost)))
+
+
+def delete_holding(ticker: str):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM holdings WHERE ticker = ?", (ticker,))
 
 
 # ---- daily_plan（作戦ボード） ----

@@ -316,6 +316,36 @@ def refresh(demo: bool = Query(False), period: str = Query("6mo")):
 
 
 # ---------------------------------------------------------------------------
+# holdings（保有ポジション）
+# ---------------------------------------------------------------------------
+class HoldingIn(BaseModel):
+    ticker: str
+    shares: float
+    avg_cost: float
+
+
+@app.get("/holdings")
+def get_holdings():
+    return db.list_holdings()
+
+
+@app.put("/holdings")
+def put_holding(payload: HoldingIn):
+    if payload.shares <= 0 or payload.avg_cost <= 0:
+        # 0 以下は保有解除とみなす
+        db.delete_holding(payload.ticker)
+        return {"deleted": payload.ticker}
+    db.upsert_holding(payload.ticker, payload.shares, payload.avg_cost)
+    return {"ticker": payload.ticker, "shares": payload.shares, "avg_cost": payload.avg_cost}
+
+
+@app.delete("/holdings/{ticker}")
+def remove_holding(ticker: str):
+    db.delete_holding(ticker)
+    return {"deleted": ticker}
+
+
+# ---------------------------------------------------------------------------
 # 作戦ボード（強化4）
 # ---------------------------------------------------------------------------
 @app.get("/plan")
