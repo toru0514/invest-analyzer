@@ -12,14 +12,18 @@ export default function StockDetail({ params }: { params: Promise<{ ticker: stri
   const ticker = decodeURIComponent(raw);
   const [candles, setCandles] = useState<Candle[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [name, setName] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [c, s] = await Promise.all([api.getPrices(ticker), api.getSignals(ticker, 50)]);
+        const [c, s, watch] = await Promise.all([
+          api.getPrices(ticker), api.getSignals(ticker, 50), api.getWatchlist(),
+        ]);
         setCandles(c);
         setSignals(s);
+        setName(watch.find((w) => w.ticker === ticker)?.name ?? "");
       } catch (e) {
         setError(String(e));
       }
@@ -34,7 +38,9 @@ export default function StockDetail({ params }: { params: Promise<{ ticker: stri
         ← ダッシュボード
       </Link>
       <h1 className="mt-2 mb-4 text-xl font-bold">
-        <span className="font-mono">{ticker}</span> 銘柄詳細
+        <span className="font-mono">{ticker}</span>
+        {name && <span className="ml-2">{name}</span>}
+        <span className="ml-2 text-base font-normal text-slate-500">銘柄詳細</span>
       </h1>
 
       {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

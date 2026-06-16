@@ -25,6 +25,7 @@ export default function PlanBoard() {
   const [rows, setRows] = useState<PlanRow[]>([]);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [prices, setPrices] = useState<Record<string, { date: string; close: number }>>({});
+  const [names, setNames] = useState<Record<string, string>>({});
   const [demo, setDemo] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,11 +34,14 @@ export default function PlanBoard() {
   async function load() {
     setError(null);
     try {
-      const [plan, hs, ps] = await Promise.all([api.getPlan(), api.getHoldings(), api.getLatestPrices()]);
+      const [plan, hs, ps, watch] = await Promise.all([
+        api.getPlan(), api.getHoldings(), api.getLatestPrices(), api.getWatchlist(),
+      ]);
       setPlanDate(plan.plan_date);
       setRows(plan.rows);
       setHoldings(hs);
       setPrices(ps);
+      setNames(Object.fromEntries(watch.map((w) => [w.ticker, w.name])));
     } catch (e) {
       setError(String(e));
     }
@@ -125,6 +129,7 @@ export default function PlanBoard() {
             <PlanCard
               key={r.id}
               row={r}
+              name={names[r.ticker]}
               holding={heldMap.get(r.ticker) ?? null}
               price={prices[r.ticker]?.close ?? null}
               onChanged={load}
@@ -140,6 +145,7 @@ export default function PlanBoard() {
             {watching.map((r) => (
               <li key={r.id}>
                 <span className="font-mono">{r.ticker}</span>
+                {names[r.ticker] && <span className="ml-1">{names[r.ticker]}</span>}
                 {r.weekly_trend && <span className="ml-1">（週足 {TREND_LABEL[r.weekly_trend]}）</span>}
               </li>
             ))}
@@ -153,8 +159,8 @@ export default function PlanBoard() {
 }
 
 function PlanCard({
-  row, holding, price, onChanged,
-}: { row: PlanRow; holding: Holding | null; price: number | null; onChanged: () => Promise<void> }) {
+  row, name, holding, price, onChanged,
+}: { row: PlanRow; name?: string; holding: Holding | null; price: number | null; onChanged: () => Promise<void> }) {
   const actionable = row.direction !== "neutral";
   const pnl = holding && price != null ? (price - holding.avg_cost) * holding.shares : null;
   const pnlPct = holding && price != null ? (price / holding.avg_cost - 1) * 100 : null;
@@ -167,6 +173,7 @@ function PlanCard({
     <div className="rounded border bg-white p-4">
       <div className="mb-2 flex flex-wrap items-center gap-3">
         <span className="font-mono text-lg font-bold">{row.ticker}</span>
+        {name && <span className="font-semibold text-slate-700">{name}</span>}
         <DirectionBadge direction={row.direction} />
         <span className="text-sm text-slate-500">スコア {row.score}</span>
         {row.vol_ratio != null && <span className="text-sm text-slate-500">出来高 {row.vol_ratio.toFixed(2)}倍</span>}
