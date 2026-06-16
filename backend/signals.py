@@ -422,25 +422,13 @@ def build_plan(df: pd.DataFrame, direction: str, score: int,
     atr = atr_value(df, length)
     out: dict[str, Any] = {"limit_price": None, "stop_price": None,
                            "target_price": None, "atr": atr, "rationale": None}
-    if direction not in ("buy", "sell") or atr is None:
+    if atr is None:
         return out
 
     ma = _sma_last(df["close"], limit_ma)
     ma_val = ma if ma is not None else close
 
-    if direction == "buy":
-        out["stop_price"] = close - stop_mult * atr
-        out["target_price"] = close + target_mult * atr
-        support = float(df["low"].rolling(support_n).min().iloc[-1])
-        atr_basis = close - entry_atr_mult * atr
-        candidates = {"support": support * 1.003,
-                      "ma": min(ma_val, close),     # 押し目買い: 現値より上には置かない
-                      "atr": atr_basis}
-        out["limit_price"] = candidates.get(method, candidates["ma"])
-        out["rationale"] = (
-            f"{limit_ma}日線{ma_val:.0f} / ATR押し目{atr_basis:.0f} / サポート{support:.0f}"
-            f"（方式: {method}）")
-    else:  # sell
+    if direction == "sell":
         out["stop_price"] = close + stop_mult * atr
         out["target_price"] = close - target_mult * atr
         resistance = float(df["high"].rolling(support_n).max().iloc[-1])
@@ -452,4 +440,20 @@ def build_plan(df: pd.DataFrame, direction: str, score: int,
         out["rationale"] = (
             f"{limit_ma}日線{ma_val:.0f} / ATR戻り{atr_basis:.0f} / レジスタンス{resistance:.0f}"
             f"（方式: {method}・成行も可）")
+    else:
+        # buy: 新規エントリーの提案指値つき。neutral: 保有者向けの出口（利確/損切）のみ。
+        out["stop_price"] = close - stop_mult * atr
+        out["target_price"] = close + target_mult * atr
+        if direction == "buy":
+            support = float(df["low"].rolling(support_n).min().iloc[-1])
+            atr_basis = close - entry_atr_mult * atr
+            candidates = {"support": support * 1.003,
+                          "ma": min(ma_val, close),     # 押し目買い: 現値より上には置かない
+                          "atr": atr_basis}
+            out["limit_price"] = candidates.get(method, candidates["ma"])
+            out["rationale"] = (
+                f"{limit_ma}日線{ma_val:.0f} / ATR押し目{atr_basis:.0f} / サポート{support:.0f}"
+                f"（方式: {method}）")
+        else:  # neutral
+            out["rationale"] = f"保有者向けの出口参考（ATR{atr:.0f}）"
     return out

@@ -115,6 +115,11 @@ def test_build_plan_exits_are_ordered():
     assert sell["target_price"] < close < sell["stop_price"]
     assert sell["limit_price"] >= close   # 戻り売りは現値より下に置かない
 
+    # 中立でも保有者向けの出口（利確/損切）は出す。提案指値は出さない。
+    neutral = signals.build_plan(df, "neutral", 0)
+    assert neutral["limit_price"] is None
+    assert neutral["stop_price"] < close < neutral["target_price"]
+
 
 def test_build_plan_limit_method_switch():
     df = synthetic_history("TEST.T", n=120, seed=7)

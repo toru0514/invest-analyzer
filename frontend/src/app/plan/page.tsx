@@ -222,6 +222,14 @@ function PlanCard({
           </div>
           {row!.rationale && <p className="mt-2 text-xs text-slate-500">根拠: {row!.rationale}</p>}
         </>
+      ) : holding && row && row.target_price != null ? (
+        <>
+          <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <PlanMetric label="利確目安（保有者向け）" value={`${yen(row.target_price)} 円`} sub={targetGain != null ? `保有なら ${signedYen(targetGain)}` : undefined} cls="text-green-700" />
+            <PlanMetric label="損切ライン（保有者向け）" value={`${yen(row.stop_price)} 円`} sub={stopLoss != null ? `保有なら ${signedYen(stopLoss)}` : undefined} cls="text-red-700" />
+          </div>
+          <p className="mt-2 text-xs text-slate-500">判定は中立（様子見）。上は保有ポジション向けの ATR ベースの出口の目安です。</p>
+        </>
       ) : (
         <p className="mt-2 text-xs text-slate-500">
           {row ? "判定: 中立（様子見）。保有は上で管理できます。" : "まだ作戦がありません。「作戦を生成」で判定・価格を取得してください。"}
