@@ -38,7 +38,7 @@ DEFAULT_CONFIGS: list[dict[str, Any]] = [
     # 追補版の強化（B/C/D）。スコアを多面的に補正する。
     {"rule_type": "volume_filter", "params": {"sma": 20, "surge": 1.5, "quiet": 0.7, "bonus": 1}, "weight": 1, "enabled": 1},
     {"rule_type": "weekly_trend_filter", "params": {"sma": 13, "mode": "penalty"}, "weight": 1, "enabled": 1},
-    {"rule_type": "atr_exit", "params": {"length": 14, "stop_mult": 1.5, "target_mult": 2.0, "limit_method": "support", "support_n": 20}, "weight": 1, "enabled": 1},
+    {"rule_type": "atr_exit", "params": {"length": 14, "stop_mult": 1.5, "target_mult": 1.5, "limit_method": "support", "support_n": 20}, "weight": 1, "enabled": 1},
     # price_target はスコアと独立した「即通知」経路。バックテストのスコアには算入しない。
     # {"rule_type": "price_target", "params": {"above": 1500}, "weight": 1, "enabled": 1},
 ]
@@ -100,6 +100,19 @@ def _val(df: pd.DataFrame, col: str, i: int = -1):
         return None
     v = df[col].iloc[i]
     return None if pd.isna(v) else v
+
+
+def resolve_configs(common: list[dict[str, Any]],
+                    ticker_specific: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """銘柄固有設定で共通設定を rule_type 単位で上書きした実効リストを返す。
+
+    例: ある銘柄に atr_exit を1つ登録すると、その銘柄ではその出口設定が共通より優先される。
+    price_target は1銘柄に複数登録できる即通知ルールなので上書き対象から除外し、すべて残す。
+    """
+    override_rules = {c["rule_type"] for c in ticker_specific if c["rule_type"] != "price_target"}
+    result = [c for c in common if c["rule_type"] not in override_rules]
+    result += ticker_specific
+    return result
 
 
 def _find_cfg(configs: list[dict[str, Any]], rule_type: str) -> dict | None:

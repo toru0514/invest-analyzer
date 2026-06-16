@@ -17,7 +17,7 @@ import db
 from backtest import run_backtest
 from market import get_history
 from scheduler import DailyScheduler
-from signals import build_plan, evaluate
+from signals import build_plan, evaluate, resolve_configs
 
 _scheduler: DailyScheduler | None = None
 
@@ -279,7 +279,7 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
             continue
         db.upsert_prices(ticker, df)
 
-        ticker_cfgs = common + [c for c in all_configs if c["ticker"] == ticker]
+        ticker_cfgs = resolve_configs(common, [c for c in all_configs if c["ticker"] == ticker])
         score, direction, detail = evaluate(df, ticker_cfgs, buy_th, sell_th)
         last_close = float(df["close"].iloc[-1])
         date = str(df.index[-1].date())

@@ -156,6 +156,23 @@ def test_cci_votes_buy_when_oversold():
     assert detail.get("cci") == 1 and score == 1
 
 
+def test_resolve_configs_overrides_per_ticker():
+    common = [
+        {"rule_type": "rsi", "params": {}, "weight": 1, "enabled": 1},
+        {"rule_type": "atr_exit", "params": {"target_mult": 1.5}, "weight": 1, "enabled": 1},
+    ]
+    ticker = [
+        {"rule_type": "atr_exit", "ticker": "8306.T", "params": {"target_mult": 1.2}, "weight": 1, "enabled": 1},
+        {"rule_type": "price_target", "ticker": "8306.T", "params": {"above": 3500}, "weight": 1, "enabled": 1},
+    ]
+    resolved = signals.resolve_configs(common, ticker)
+    atr = [c for c in resolved if c["rule_type"] == "atr_exit"]
+    assert len(atr) == 1                       # 上書きで重複しない
+    assert atr[0]["params"]["target_mult"] == 1.2   # 銘柄固有が優先
+    assert any(c["rule_type"] == "rsi" for c in resolved)          # 上書きされない共通は残る
+    assert any(c["rule_type"] == "price_target" for c in resolved)  # price_target は残る
+
+
 def test_atr_exit_backtest_has_extra_metrics():
     hist = {tk: synthetic_history(tk, seed=i)
             for i, tk in enumerate(["8306.T", "7203.T", "9984.T", "6758.T"])}
@@ -181,5 +198,6 @@ if __name__ == "__main__":
     test_disparity_votes_buy_when_far_below_ma()
     test_obv_votes_with_volume_trend()
     test_cci_votes_buy_when_oversold()
+    test_resolve_configs_overrides_per_ticker()
     test_atr_exit_backtest_has_extra_metrics()
     print("all smoke tests passed")
