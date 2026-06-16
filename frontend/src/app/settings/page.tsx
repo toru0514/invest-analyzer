@@ -12,6 +12,8 @@ const RULE_LABELS: Record<string, string> = {
   stoch: "ストキャスティクス",
   candle_pattern: "ローソク足パターン（赤三兵/三羽烏/包み足）",
   disparity: "乖離率（移動平均からの乖離%）",
+  obv: "OBV（出来高トレンド）",
+  cci: "CCI（売られすぎ/買われすぎ）",
   volume_filter: "出来高フィルター（ダマシ低減）",
   weekly_trend_filter: "週足トレンド足切り（逆張り事故低減）",
   atr_exit: "ATR出口設計（損切/利確・提案指値）",
@@ -50,6 +52,12 @@ const PARAM_FIELDS: Record<string, ParamField[]> = {
     { key: "ma", label: "MA期間" },
     { key: "low", label: "売られすぎ%" },
     { key: "high", label: "買われすぎ%" },
+  ],
+  obv: [{ key: "sma", label: "SMA期間" }],
+  cci: [
+    { key: "length", label: "期間" },
+    { key: "low", label: "売られすぎ" },
+    { key: "high", label: "買われすぎ" },
   ],
   volume_filter: [
     { key: "sma", label: "平均期間" },
@@ -291,6 +299,14 @@ export default function Settings() {
                 onChange={(e) => setSettings({ ...settings, scheduler_demo: e.target.checked })}
               />
               demo（合成データ）で実行
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={settings.scheduler_skip_holidays}
+                onChange={(e) => setSettings({ ...settings, scheduler_skip_holidays: e.target.checked })}
+              />
+              祝日（市場休業日）はスキップ
             </label>
           </div>
           <p className="mt-3 text-xs text-slate-500">

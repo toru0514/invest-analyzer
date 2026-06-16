@@ -26,6 +26,16 @@
 
 ## 進捗まとめ（やったこと / まだなこと / これからやること）
 
+> **2026-06 更新（Phase 5 = README「これからやること」）**:
+>
+> - **チューニング自動化**: 新画面 `/optimize`（`POST /optimize`）。スコア閾値スイープ（±2/±3/±4 × score/atr）と、
+>   各指標を1つずつ外す leave-one-out の寄与度をバックテストで算出してランキング。「この閾値を適用」で設定に保存。
+> - **指標を拡充**: **OBV**（出来高トレンド）と **CCI**（売られすぎ/買われすぎ）を追加（合計 9 スコア指標）。
+> - **frontend テスト整備**: Vitest + Testing Library を導入（`cd frontend && npm test`）。
+>   行整形ロジック・API クライアント・コンポーネントの単体テスト。
+> - **スケジューラ堅牢化**: 日本の市場休業日（祝日）カレンダーを内蔵し、`scheduler_skip_holidays`（既定 ON）で休業日をスキップ。
+>   launchd / cron による常駐手順を「依存・環境について」に記載。
+>
 > **2026-06 更新（追補版 = `今後の進め方.md`）**: 同じ OHLCV の範囲内で判断の質を上げる
 > 4 強化を実装。
 >
@@ -88,19 +98,19 @@
   同時1ポジション）。提案指値（サポート基準）そのままでの約定や、資金共有の最適配分は今後の課題。
 - **週足は日足からリサンプルして算出**（追補版の「週足を別 fetch・`timeframe` 列で保持」ではなく、
   同一日足データから週足化）。look-ahead を避けやすく追加の取得も不要なため。挙動（週足 SMA13 の傾き）は同じ。
-- **追加指標の拡充は途中**（現状は 7 指標〔RSI/MA/MACD/BB/ストキャス/ローソク足/乖離率〕＋
-  出来高/週足/ATR フィルター + 指定金額アラート。ATR・出来高系の追加指標化は今後）。
-- **frontend の自動テストは未整備**（backend は計算コア/API 結合/スケジューラのテストあり。UI は手動/E2E 目視）。
-- **スケジューラは API プロセス常駐前提**（プロセスを落とすと動かない。OS 常駐や cron 化は別途）。
+- **現状の指標は 9 種**（RSI/MA/MACD/BB/ストキャス/ローソク足/乖離率/OBV/CCI）＋
+  出来高/週足/ATR フィルター + 指定金額アラート。さらなる指標追加は `/optimize` の寄与度を見ながら継続。
+- **frontend テストは単体中心**（Vitest で行整形・API クライアント・コンポーネント。ブラウザ E2E〔Playwright〕は未整備）。
+- **スケジューラは API プロセス常駐前提**（祝日スキップは対応済み。OS 常駐は launchd/cron で・下記参照）。
+- **祝日カレンダーは内蔵の簡易版**（2025〜2027 を収録。臨時休業や祝日法改正は毎年見直し前提）。
 - **永続化・認証なし**（ローカル単一ユーザー前提。クラウド公開は想定外）。
 
 ### 🔜 これからやること（提案 / 優先度順）
 
-1. **実データでチューニング**：`make dev` → 実データ refresh → シミュレーションで成績を確認し、
-   効く指標に weight を寄せる・閾値や params を設定 UI から調整する。
-2. **指標の拡充と検証**：ATR 系・出来高系などをさらに追加し、バックテストで取捨選択。
-3. **frontend テスト**：コンポーネント/E2E テスト（Playwright 等）の整備。
-4. **スケジューラの堅牢化**：祝日カレンダー対応、launchd/cron での常駐化。
+1. **実データでチューニング**：`/optimize` で閾値スイープ・寄与度を見て、効かない指標は設定で重みを下げる/OFF。
+2. **ブラウザ E2E テスト**：Playwright 等で主要フロー（更新→判定→作戦ボード）を自動化。
+3. **指標のさらなる拡充**：`/optimize` の寄与度で取捨選択しながら追加。
+4. **クラウド/マルチユーザー対応**：認証・永続化（必要になれば）。
 
 > ⚠️ いずれも **自動売買は実装しない**（通知まで）方針は変えません。
 
@@ -114,13 +124,17 @@
   market.py           ... yfinance データ取得（+ 合成データ）
   backtest.py         ... ペーパートレード・バックテスト
   db.py               ... SQLite（§2 スキーマ・CRUD・app_meta 設定）
-  scheduler.py        ... 日次自動更新スケジューラ（常駐スレッド）
-  main.py             ... FastAPI エンドポイント
+  scheduler.py        ... 日次自動更新スケジューラ（常駐スレッド・祝日スキップ）
+  holidays_jp.py      ... 日本の市場休業日カレンダー（内蔵・2025〜2027）
+  main.py             ... FastAPI エンドポイント（/optimize 含む）
   phase0_backtest.py  ... Phase 0 検証スクリプト（CLI）
   test_signals.py     ... 計算コアのスモークテスト
   test_api.py         ... API 結合テスト（FastAPI TestClient）
   test_scheduler.py   ... スケジューラのロジックテスト
 /frontend  ... Next.js (TypeScript, App Router)
+  src/lib/rows.ts     ... ダッシュボード行整形（純関数・テスト対象）
+  src/**/__tests__    ... Vitest の単体/コンポーネントテスト
+  vitest.config.mts   ... Vitest 設定
 /data.db   ... SQLite（.gitignore 済み・初回起動時に自動生成）
 /Makefile  ... 一括起動など
 ```
@@ -175,6 +189,7 @@ make frontend     # = cd frontend && npm run dev
 | 銘柄詳細 | `/stocks/[ticker]` | ローソク足チャート（lightweight-charts）＋シグナル履歴 |
 | 設定 | `/settings` | 銘柄の追加/削除、スコア閾値・自動更新、各指標の重み/ON-OFF/params、指定金額アラートの追加・削除 |
 | シミュレーション | `/simulation` | 期間・資金を指定してバックテスト → §4 成績表＋資産推移グラフ（recharts）。「ATR出口ルール」ON で出口入りシミュレーション（強化J） |
+| 最適化 | `/optimize` | スコア閾値スイープと各指標の寄与度（leave-one-out）を自動評価し、推奨閾値を適用 |
 
 ### 通知（Phase 2）
 
@@ -202,7 +217,8 @@ make frontend     # = cd frontend && npm run dev
 | POST | `/refresh?demo=` | 最新データ取得＋再判定＋作戦ボード生成（全 enabled 銘柄） |
 | GET | `/plan?date=` | 作戦ボード（指定日／省略時は最新） |
 | POST | `/plan/generate?demo=` | 全 enabled 銘柄の翌日作戦ボードを生成・保存 |
-| POST | `/backtest` | 期間・資金を受けてシミュレーション、§4 成績を返す |
+| POST | `/backtest` | 期間・資金を受けてシミュレーション、§4 成績を返す（`exit_mode`: score/atr） |
+| POST | `/optimize` | 閾値スイープ＋指標の寄与度（leave-one-out）を返すチューニング自動化 |
 
 `?demo=true` / リクエストボディ `"demo": true` で合成データを使用します。
 
@@ -262,3 +278,37 @@ yfinance は Yahoo Finance（`query1/query2.finance.yahoo.com`）にアクセス
 **ローカル PC では通常そのまま動作します。** クラウド / サンドボックスなど egress 制限のある
 環境では上記ホストがブロックされ取得に失敗します。その場合はホストを許可リストに追加するか、
 各画面の「demo（合成データ）」/ CLI の `--demo` で計算ロジックの検証のみ行ってください。
+
+### 自動更新スケジューラの常駐（macOS launchd）
+
+設定画面の「日次自動更新」は **API プロセスが起動している間だけ** 動きます（毎営業日の指定時刻に
+場後の refresh→判定→通知。祝日は `scheduler_skip_holidays` 既定 ON でスキップ）。
+PC 起動中ずっと動かすには API（uvicorn）を常駐させます。launchd の例:
+
+```xml
+<!-- ~/Library/LaunchAgents/com.invest-analyzer.api.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.invest-analyzer.api</string>
+  <key>WorkingDirectory</key><string>/path/to/invest-analyzer/backend</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/path/to/invest-analyzer/backend/venv/bin/uvicorn</string>
+    <string>main:app</string><string>--port</string><string>8000</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict></plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.invest-analyzer.api.plist   # 常駐開始
+launchctl unload ~/Library/LaunchAgents/com.invest-analyzer.api.plist # 停止
+```
+
+（cron 派は、毎営業日 16:10 に `curl -X POST localhost:8000/plan/generate` を叩く形でも代替できます。）
+
+### frontend のテスト
+
+```bash
+cd frontend && npm test       # Vitest（行整形・API クライアント・コンポーネント）
+```

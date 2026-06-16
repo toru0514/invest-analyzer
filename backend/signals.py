@@ -31,6 +31,10 @@ DEFAULT_CONFIGS: list[dict[str, Any]] = [
     {"rule_type": "candle_pattern", "params": {}, "weight": 1, "enabled": 1},
     # 乖離率（移動平均からの乖離%）。MA より大きく下なら売られすぎ→買い、上なら買われすぎ→売り。
     {"rule_type": "disparity", "params": {"ma": 25, "low": -7, "high": 7}, "weight": 1, "enabled": 1},
+    # OBV（出来高系）: OBV がその移動平均より上＝出来高が上昇を支持→買い、下→売り。
+    {"rule_type": "obv", "params": {"sma": 20}, "weight": 1, "enabled": 1},
+    # CCI（逆張りオシレーター）: -100 以下で売られすぎ→買い、+100 以上で買われすぎ→売り。
+    {"rule_type": "cci", "params": {"length": 20, "low": -100, "high": 100}, "weight": 1, "enabled": 1},
     # 追補版の強化（B/C/D）。スコアを多面的に補正する。
     {"rule_type": "volume_filter", "params": {"sma": 20, "surge": 1.5, "quiet": 0.7, "bonus": 1}, "weight": 1, "enabled": 1},
     {"rule_type": "weekly_trend_filter", "params": {"sma": 13, "mode": "penalty"}, "weight": 1, "enabled": 1},
@@ -159,6 +163,33 @@ def atr_value(df: pd.DataFrame, length: int = 14) -> float | None:
     return None if pd.isna(atr) else float(atr)
 
 
+def obv_vs_sma(df: pd.DataFrame, sma: int = 20):
+    """(OBV最新値, OBVのSMA最新値) を返す。出来高で上昇/下降を確認する（出来高系）。"""
+    if "volume" not in df.columns or len(df) < sma + 1:
+        return None, None
+    direction = df["close"].diff().fillna(0.0)
+    signed = df["volume"].where(direction >= 0, -df["volume"])
+    obv = signed.cumsum()
+    obv_sma = obv.rolling(sma).mean().iloc[-1]
+    cur = obv.iloc[-1]
+    if pd.isna(obv_sma) or pd.isna(cur):
+        return None, None
+    return float(cur), float(obv_sma)
+
+
+def cci_value(df: pd.DataFrame, length: int = 20) -> float | None:
+    """CCI（Commodity Channel Index）の最新値のみを効率的に算出（逆張りオシレーター）。"""
+    if len(df) < length:
+        return None
+    tp = (df["high"] + df["low"] + df["close"]) / 3.0
+    window = tp.iloc[-length:]
+    mean = window.mean()
+    mad = (window - mean).abs().mean()
+    if mad == 0 or pd.isna(mad):
+        return None
+    return float((tp.iloc[-1] - mean) / (0.015 * mad))
+
+
 def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[int, dict]:
     """指標列が計算済みの DataFrame の最終行をスコアリングする（状態ベース）。
 
@@ -264,6 +295,26 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[
                 score += w; detail["disparity"] = +w
             elif disp >= p.get("high", 7):
                 score -= w; detail["disparity"] = -w
+
+        elif rt == "obv":
+            # 出来高系: OBV が SMA より上＝出来高が上昇を支持→買い、下→売り。
+            obv, obv_sma = obv_vs_sma(df, int(p.get("sma", 20)))
+            if obv is None:
+                continue
+            if obv > obv_sma:
+                score += w; detail["obv"] = +w
+            elif obv < obv_sma:
+                score -= w; detail["obv"] = -w
+
+        elif rt == "cci":
+            # 逆張り: CCI が下限以下＝売られすぎ→買い、上限以上＝買われすぎ→売り。
+            cci = cci_value(df, int(p.get("length", 20)))
+            if cci is None:
+                continue
+            if cci <= p.get("low", -100):
+                score += w; detail["cci"] = +w
+            elif cci >= p.get("high", 100):
+                score -= w; detail["cci"] = -w
 
         elif rt == "price_target":
             # スコアとは別経路（即通知）。バックテストのスコアには算入しない。

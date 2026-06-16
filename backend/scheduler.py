@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 import db
+from holidays_jp import is_market_holiday
 
 JST = timezone(timedelta(hours=9))
 TICK_SECONDS = 30
@@ -55,13 +56,16 @@ class DailyScheduler:
             return
         if now.weekday() >= 5:   # 土(5)・日(6)は実行しない
             return
+        today = now.date().isoformat()
+        # 祝日スキップ（既定 ON）。市場休業日には自動更新しない。
+        if m.get("scheduler_skip_holidays", "1") == "1" and is_market_holiday(today):
+            return
 
         try:
             hh, mm = (int(x) for x in m.get("scheduler_time", "16:00").split(":"))
         except (ValueError, AttributeError):
             return
 
-        today = now.date().isoformat()
         if self._last_run_date == today:
             return
         # 指定時刻を過ぎていれば、その営業日の分を1回だけ実行（起動が遅れてもキャッチアップ）。

@@ -14,7 +14,8 @@ from scheduler import JST, DailyScheduler
 
 
 def _patch_meta(monkeypatch, **kw):
-    base = {"scheduler_enabled": "1", "scheduler_time": "16:00", "scheduler_demo": "0"}
+    base = {"scheduler_enabled": "1", "scheduler_time": "16:00", "scheduler_demo": "0",
+            "scheduler_skip_holidays": "1"}
     base.update(kw)
     monkeypatch.setattr(scheduler.db, "get_all_meta", lambda: base)
 
@@ -62,3 +63,19 @@ def test_does_not_run_on_weekend(monkeypatch):
     sch._tick(datetime(2026, 6, 20, 17, 0, tzinfo=JST))   # 土曜
     sch._tick(datetime(2026, 6, 21, 17, 0, tzinfo=JST))   # 日曜
     assert calls == []
+
+
+def test_skips_market_holiday(monkeypatch):
+    calls = []
+    _patch_meta(monkeypatch)   # scheduler_skip_holidays = "1"
+    sch = DailyScheduler(lambda demo=False: calls.append(demo))
+    sch._tick(datetime(2026, 5, 5, 17, 0, tzinfo=JST))    # こどもの日（平日・祝日）
+    assert calls == []
+
+
+def test_runs_on_holiday_when_skip_disabled(monkeypatch):
+    calls = []
+    _patch_meta(monkeypatch, scheduler_skip_holidays="0")
+    sch = DailyScheduler(lambda demo=False: calls.append(demo))
+    sch._tick(datetime(2026, 5, 5, 17, 0, tzinfo=JST))    # 祝日でもスキップ無効なら実行
+    assert calls == [False]

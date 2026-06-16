@@ -48,6 +48,7 @@ export type AppSettings = {
   scheduler_enabled: boolean;
   scheduler_time: string;
   scheduler_demo: boolean;
+  scheduler_skip_holidays: boolean;
 };
 
 export type Candle = {
@@ -75,6 +76,25 @@ export type PlanRow = {
 };
 
 export type PlanResponse = { plan_date: string | null; rows: PlanRow[]; failed?: string[] };
+
+export type SweepRow = {
+  threshold: number;
+  exit_mode: "score" | "atr";
+  pnl_pct: number;
+  win_rate: number | null;
+  trade_count: number;
+  max_drawdown_pct: number;
+};
+export type ContribRow = { rule_type: string; pnl_without: number; delta: number };
+export type OptimizeResponse = {
+  sweep: SweepRow[];
+  best: SweepRow | null;
+  baseline_pnl_pct: number;
+  contributions: ContribRow[];
+  failed: string[];
+  tickers: string[];
+  days: number;
+};
 
 export type BacktestResult = {
   initial: number;
@@ -151,4 +171,7 @@ export const api = {
     req<PlanResponse>(`/plan${date ? `?date=${encodeURIComponent(date)}` : ""}`),
   generatePlan: (demo: boolean) =>
     req<PlanResponse>(`/plan/generate?demo=${demo}`, { method: "POST" }),
+
+  optimize: (body: { days?: number; demo?: boolean; tickers?: string[] }) =>
+    req<OptimizeResponse>("/optimize", { method: "POST", body: JSON.stringify(body) }),
 };

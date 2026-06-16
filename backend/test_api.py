@@ -51,8 +51,8 @@ def test_watchlist_crud(client):
 def test_config_crud_and_price_target(client):
     configs = client.get("/config").json()
     indicators = [c for c in configs if c["rule_type"] != "price_target"]
-    # 既定: 状態ベース6指標 + 乖離率 + 追補版3フィルター（volume/weekly/atr）= 10
-    assert len(indicators) == 10
+    # 既定: 状態ベース6指標 + 乖離率/OBV/CCI + 追補版3フィルター（volume/weekly/atr）= 12
+    assert len(indicators) == 12
 
     # 重み更新
     target = indicators[0]

@@ -5,6 +5,7 @@ const links = [
   { href: "/plan", label: "作戦ボード" },
   { href: "/settings", label: "設定" },
   { href: "/simulation", label: "シミュレーション" },
+  { href: "/optimize", label: "最適化" },
 ];
 
 export default function Nav() {
