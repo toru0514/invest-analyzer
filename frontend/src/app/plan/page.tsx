@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, Holding, PlanRow } from "@/lib/api";
+import { api, Holding, PlanRow, WatchItem } from "@/lib/api";
 import DirectionBadge from "@/components/DirectionBadge";
 import Disclaimer from "@/components/Disclaimer";
 
@@ -23,25 +23,29 @@ function signedYen(v: number) {
 export default function PlanBoard() {
   const [planDate, setPlanDate] = useState<string | null>(null);
   const [rows, setRows] = useState<PlanRow[]>([]);
+  const [watch, setWatch] = useState<WatchItem[]>([]);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [prices, setPrices] = useState<Record<string, { date: string; close: number }>>({});
-  const [names, setNames] = useState<Record<string, string>>({});
   const [demo, setDemo] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
+  // 銘柄追加フォーム
+  const [newTicker, setNewTicker] = useState("");
+  const [newName, setNewName] = useState("");
+
   async function load() {
     setError(null);
     try {
-      const [plan, hs, ps, watch] = await Promise.all([
+      const [plan, hs, ps, w] = await Promise.all([
         api.getPlan(), api.getHoldings(), api.getLatestPrices(), api.getWatchlist(),
       ]);
       setPlanDate(plan.plan_date);
       setRows(plan.rows);
       setHoldings(hs);
       setPrices(ps);
-      setNames(Object.fromEntries(watch.map((w) => [w.ticker, w.name])));
+      setWatch(w);
     } catch (e) {
       setError(String(e));
     }
@@ -69,11 +73,33 @@ export default function PlanBoard() {
     }
   }
 
-  const heldMap = new Map(holdings.map((h) => [h.ticker, h]));
-  const cards = rows.filter((r) => r.direction !== "neutral" || heldMap.has(r.ticker));
-  const watching = rows.filter((r) => r.direction === "neutral" && !heldMap.has(r.ticker));
+  async function addStock(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newTicker.trim() || !newName.trim()) return;
+    try {
+      await api.addWatch(newTicker.trim(), newName.trim());
+      setNewTicker("");
+      setNewName("");
+      setStatus("銘柄を追加しました。「作戦を生成」で判定・価格を取得してください。");
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
 
-  // 保有合計（含み損益）
+  const planByTicker = new Map(rows.map((r) => [r.ticker, r]));
+  const heldMap = new Map(holdings.map((h) => [h.ticker, h]));
+
+  // 並び順: 買い/売り → 保有 → 中立(作戦あり) → 作戦未生成
+  function prio(ticker: string): number {
+    const r = planByTicker.get(ticker);
+    if (r && r.direction !== "neutral") return 0;
+    if (heldMap.has(ticker)) return 1;
+    if (r) return 2;
+    return 3;
+  }
+  const ordered = [...watch].sort((a, b) => prio(a.ticker) - prio(b.ticker));
+
   const totalPnl = holdings.reduce((acc, h) => {
     const p = prices[h.ticker]?.close;
     return p != null ? acc + (p - h.avg_cost) * h.shares : acc;
@@ -112,6 +138,17 @@ export default function PlanBoard() {
         </div>
       </div>
 
+      {/* 銘柄追加 */}
+      <form onSubmit={addStock} className="mb-3 flex flex-wrap items-center gap-2 rounded border bg-white px-3 py-2 text-sm">
+        <span className="text-xs font-semibold text-slate-500">銘柄を追加</span>
+        <input value={newTicker} onChange={(e) => setNewTicker(e.target.value)} placeholder="ティッカー（例: 6501.T）"
+          className="rounded border px-2 py-1" />
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="銘柄名（例: 日立製作所）"
+          className="rounded border px-2 py-1" />
+        <button className="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-700">追加</button>
+        <span className="text-xs text-slate-400">追加後は「作戦を生成」で判定・価格を取得</span>
+      </form>
+
       {status && <p className="mb-3 rounded bg-slate-100 px-3 py-2 text-sm text-slate-700">{status}</p>}
       {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}（Python API :8000 を確認）</p>}
 
@@ -119,38 +156,24 @@ export default function PlanBoard() {
         提案指値は「人間が証券アプリで注文を置くための数字」です。発注・自動売買は行いません。
       </p>
 
-      {cards.length === 0 ? (
+      {ordered.length === 0 ? (
         <div className="rounded border bg-white p-6 text-center text-sm text-slate-500">
-          買い/売りの作戦・保有はありません。「作戦を生成」で再判定するか、銘柄カードで保有を登録してください。
+          監視銘柄がありません。上の「銘柄を追加」から登録してください。
         </div>
       ) : (
         <div className="space-y-3">
-          {cards.map((r) => (
+          {ordered.map((w) => (
             <PlanCard
-              key={r.id}
-              row={r}
-              name={names[r.ticker]}
-              holding={heldMap.get(r.ticker) ?? null}
-              price={prices[r.ticker]?.close ?? null}
+              key={w.id}
+              ticker={w.ticker}
+              name={w.name}
+              row={planByTicker.get(w.ticker) ?? null}
+              holding={heldMap.get(w.ticker) ?? null}
+              price={prices[w.ticker]?.close ?? null}
               onChanged={load}
             />
           ))}
         </div>
-      )}
-
-      {watching.length > 0 && (
-        <section className="mt-6 rounded border bg-white p-4">
-          <h2 className="mb-2 text-sm font-semibold text-slate-600">様子見（中立・未保有）</h2>
-          <ul className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500">
-            {watching.map((r) => (
-              <li key={r.id}>
-                <span className="font-mono">{r.ticker}</span>
-                {names[r.ticker] && <span className="ml-1">{names[r.ticker]}</span>}
-                {r.weekly_trend && <span className="ml-1">（週足 {TREND_LABEL[r.weekly_trend]}）</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
       )}
 
       <Disclaimer />
@@ -159,48 +182,50 @@ export default function PlanBoard() {
 }
 
 function PlanCard({
-  row, name, holding, price, onChanged,
-}: { row: PlanRow; name?: string; holding: Holding | null; price: number | null; onChanged: () => Promise<void> }) {
-  const actionable = row.direction !== "neutral";
+  ticker, name, row, holding, price, onChanged,
+}: {
+  ticker: string; name?: string; row: PlanRow | null; holding: Holding | null;
+  price: number | null; onChanged: () => Promise<void>;
+}) {
+  const actionable = row != null && row.direction !== "neutral";
   const pnl = holding && price != null ? (price - holding.avg_cost) * holding.shares : null;
   const pnlPct = holding && price != null ? (price / holding.avg_cost - 1) * 100 : null;
-
-  // 利確/損切に到達したときの保有株での損益（金額換算）
-  const targetGain = holding && row.target_price != null ? (row.target_price - holding.avg_cost) * holding.shares : null;
-  const stopLoss = holding && row.stop_price != null ? (row.stop_price - holding.avg_cost) * holding.shares : null;
+  const targetGain = holding && row?.target_price != null ? (row.target_price - holding.avg_cost) * holding.shares : null;
+  const stopLoss = holding && row?.stop_price != null ? (row.stop_price - holding.avg_cost) * holding.shares : null;
 
   return (
     <div className="rounded border bg-white p-4">
       <div className="mb-2 flex flex-wrap items-center gap-3">
-        <span className="font-mono text-lg font-bold">{row.ticker}</span>
+        <span className="font-mono text-lg font-bold">{ticker}</span>
         {name && <span className="font-semibold text-slate-700">{name}</span>}
-        <DirectionBadge direction={row.direction} />
-        <span className="text-sm text-slate-500">スコア {row.score}</span>
-        {row.vol_ratio != null && <span className="text-sm text-slate-500">出来高 {row.vol_ratio.toFixed(2)}倍</span>}
-        {row.weekly_trend && (
+        {row ? <DirectionBadge direction={row.direction} /> : <span className="text-xs text-slate-400">作戦未生成</span>}
+        {row && <span className="text-sm text-slate-500">スコア {row.score}</span>}
+        {row?.vol_ratio != null && <span className="text-sm text-slate-500">出来高 {row.vol_ratio.toFixed(2)}倍</span>}
+        {row?.weekly_trend && (
           <span className={`text-sm ${TREND_CLASS[row.weekly_trend] ?? ""}`}>
             週足 {TREND_LABEL[row.weekly_trend] ?? row.weekly_trend}
           </span>
         )}
-        <Link href={`/stocks/${encodeURIComponent(row.ticker)}`} className="ml-auto text-sm text-blue-700 hover:underline">
+        <Link href={`/stocks/${encodeURIComponent(ticker)}`} className="ml-auto text-sm text-blue-700 hover:underline">
           チャート →
         </Link>
       </div>
 
-      {/* 保有ポジション（直接入力） */}
-      <HoldingEditor ticker={row.ticker} holding={holding} price={price} pnl={pnl} pnlPct={pnlPct} onChanged={onChanged} />
+      <HoldingEditor ticker={ticker} holding={holding} price={price} pnl={pnl} pnlPct={pnlPct} onChanged={onChanged} />
 
       {actionable ? (
         <>
           <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
-            <PlanMetric label={row.direction === "buy" ? "提案指値（買）" : "提案指値（売）"} value={`${yen(row.limit_price)} 円`} accent />
-            <PlanMetric label="利確目安" value={`${yen(row.target_price)} 円`} sub={targetGain != null ? `保有なら ${signedYen(targetGain)}` : undefined} cls="text-green-700" />
-            <PlanMetric label="損切ライン" value={`${yen(row.stop_price)} 円`} sub={stopLoss != null ? `保有なら ${signedYen(stopLoss)}` : undefined} cls="text-red-700" />
+            <PlanMetric label={row!.direction === "buy" ? "提案指値（買）" : "提案指値（売）"} value={`${yen(row!.limit_price)} 円`} accent />
+            <PlanMetric label="利確目安" value={`${yen(row!.target_price)} 円`} sub={targetGain != null ? `保有なら ${signedYen(targetGain)}` : undefined} cls="text-green-700" />
+            <PlanMetric label="損切ライン" value={`${yen(row!.stop_price)} 円`} sub={stopLoss != null ? `保有なら ${signedYen(stopLoss)}` : undefined} cls="text-red-700" />
           </div>
-          {row.rationale && <p className="mt-2 text-xs text-slate-500">根拠: {row.rationale}</p>}
+          {row!.rationale && <p className="mt-2 text-xs text-slate-500">根拠: {row!.rationale}</p>}
         </>
       ) : (
-        <p className="mt-2 text-xs text-slate-500">判定: 中立（様子見）。保有は上で管理できます。</p>
+        <p className="mt-2 text-xs text-slate-500">
+          {row ? "判定: 中立（様子見）。保有は上で管理できます。" : "まだ作戦がありません。「作戦を生成」で判定・価格を取得してください。"}
+        </p>
       )}
     </div>
   );
@@ -269,6 +294,9 @@ function HoldingEditor({
               {pnlPct != null && ` (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`}
             </span>
           </span>
+        )}
+        {holding && price == null && (
+          <span className="ml-auto text-xs text-slate-400">現在値は「作戦を生成」で取得</span>
         )}
       </div>
     </div>
