@@ -1,0 +1,53 @@
+import { describe, it, expect } from "vitest";
+import { mergeRows, applyRefresh, Row } from "@/lib/rows";
+import { RefreshRow, Signal, WatchItem } from "@/lib/api";
+
+const watch: WatchItem[] = [
+  { id: 1, ticker: "8306.T", name: "三菱UFJ", enabled: 1, created_at: "" },
+  { id: 2, ticker: "7203.T", name: "トヨタ", enabled: 1, created_at: "" },
+];
+
+describe("mergeRows", () => {
+  it("最新シグナル・現在値・出来高倍率・週足を銘柄に紐付ける", () => {
+    const signals: Signal[] = [
+      { id: 10, ticker: "8306.T", date: "2026-06-15", score: 2, direction: "buy",
+        detail: { vol_ratio: 1.2, weekly_trend: "up" }, notified: 0 },
+    ];
+    const prices = { "8306.T": { date: "2026-06-15", close: 3250 } };
+    const rows = mergeRows(watch, signals, prices);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      ticker: "8306.T", price: 3250, score: 2, direction: "buy",
+      volRatio: 1.2, weeklyTrend: "up",
+    });
+    // シグナルが無い銘柄は null 埋め
+    expect(rows[1]).toMatchObject({ ticker: "7203.T", price: null, score: null, direction: null });
+  });
+
+  it("同一銘柄では先頭（最新）のシグナルを採用する", () => {
+    const signals: Signal[] = [
+      { id: 20, ticker: "8306.T", date: "2026-06-15", score: 3, direction: "buy", detail: {}, notified: 0 },
+      { id: 11, ticker: "8306.T", date: "2026-06-12", score: -2, direction: "sell", detail: {}, notified: 0 },
+    ];
+    const rows = mergeRows(watch, signals);
+    expect(rows[0].score).toBe(3);
+    expect(rows[0].direction).toBe("buy");
+  });
+});
+
+describe("applyRefresh", () => {
+  it("更新分だけ上書きし、対象外の行はそのまま残す", () => {
+    const base: Row[] = [
+      { id: 1, ticker: "8306.T", name: "三菱UFJ", price: 100, score: 0, direction: "neutral", date: "old", volRatio: null, weeklyTrend: null },
+      { id: 2, ticker: "7203.T", name: "トヨタ", price: 200, score: 1, direction: "neutral", date: "old", volRatio: 0.9, weeklyTrend: "flat" },
+    ];
+    const updated: RefreshRow[] = [
+      { id: 99, ticker: "8306.T", date: "2026-06-16", price: 3260, score: 2, direction: "buy",
+        detail: { vol_ratio: 1.5, weekly_trend: "up" } },
+    ];
+    const out = applyRefresh(base, updated);
+    expect(out[0]).toMatchObject({ price: 3260, score: 2, direction: "buy", volRatio: 1.5, weeklyTrend: "up" });
+    expect(out[1]).toBe(base[1]); // 未更新は同一参照
+  });
+});

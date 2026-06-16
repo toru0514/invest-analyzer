@@ -128,6 +128,34 @@ def test_disparity_votes_buy_when_far_below_ma():
     assert detail.get("disparity") == 1 and score == 1
 
 
+def test_obv_votes_with_volume_trend():
+    import numpy as np
+    import pandas as pd
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-15"), periods=60)
+    close = np.linspace(1000, 1200, 60)          # 一貫した上昇
+    df = pd.DataFrame({"open": close, "high": close + 2, "low": close - 2,
+                       "close": close, "volume": 1_000_000.0}, index=idx)
+    obv, obv_sma = signals.obv_vs_sma(df, 20)
+    assert obv is not None and obv > obv_sma      # 上昇トレンドでは OBV が SMA を上回る
+    cfg = [{"rule_type": "obv", "params": {"sma": 20}, "weight": 1, "enabled": 1}]
+    score, detail = signals._score_indicators(signals.add_indicators(df), cfg)
+    assert detail.get("obv") == 1 and score == 1
+
+
+def test_cci_votes_buy_when_oversold():
+    import numpy as np
+    import pandas as pd
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-15"), periods=40)
+    close = np.concatenate([np.full(35, 1000.0), np.linspace(1000, 880, 5)])
+    df = pd.DataFrame({"open": close, "high": close + 1, "low": close - 1,
+                       "close": close, "volume": 1_000_000.0}, index=idx)
+    assert signals.cci_value(df, 20) <= -100      # 急落で売られすぎ
+    cfg = [{"rule_type": "cci", "params": {"length": 20, "low": -100, "high": 100},
+            "weight": 1, "enabled": 1}]
+    score, detail = signals._score_indicators(signals.add_indicators(df), cfg)
+    assert detail.get("cci") == 1 and score == 1
+
+
 def test_atr_exit_backtest_has_extra_metrics():
     hist = {tk: synthetic_history(tk, seed=i)
             for i, tk in enumerate(["8306.T", "7203.T", "9984.T", "6758.T"])}
@@ -151,5 +179,7 @@ if __name__ == "__main__":
     test_weekly_trend_block_suppresses_counter_trend()
     test_build_plan_exits_are_ordered()
     test_disparity_votes_buy_when_far_below_ma()
+    test_obv_votes_with_volume_trend()
+    test_cci_votes_buy_when_oversold()
     test_atr_exit_backtest_has_extra_metrics()
     print("all smoke tests passed")

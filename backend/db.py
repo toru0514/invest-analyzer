@@ -95,6 +95,7 @@ DEFAULT_META = {
     "scheduler_enabled": "0",
     "scheduler_time": "16:00",   # JST・場後（HH:MM）
     "scheduler_demo": "0",
+    "scheduler_skip_holidays": "1",   # 市場休業日（祝日）は自動更新しない
 }
 
 # 起動時に投入する初期監視銘柄
