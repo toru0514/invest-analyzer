@@ -81,7 +81,7 @@ class ConfigUpdateList(BaseModel):
 class BacktestIn(BaseModel):
     tickers: Optional[list[str]] = None
     demo: bool = False
-    days: int = 22
+    days: Optional[int] = None   # 未指定なら取得期間全体（warmup以降）を評価
     initial_capital: float = 3000.0
     exit_mode: str = "plan"      # 既定を plan（検証=提示）に
     persist: bool = False
@@ -452,14 +452,17 @@ def backtest(payload: BacktestIn):
     configs = db.list_configs(active_only=True)
     common = [c for c in configs if c["ticker"] is None]
     cost = cost_from_configs(common)
+    # days 未指定なら取得期間全体（warmup以降）を評価する
+    bdays = payload.days if payload.days is not None else max(
+        (len(df) for df in histories.values()), default=0) + 1
     result = run_backtest(histories, configs=common, initial_capital=payload.initial_capital,
-                          backtest_days=payload.days, buy_threshold=buy_th, sell_threshold=sell_th,
+                          backtest_days=bdays, buy_threshold=buy_th, sell_threshold=sell_th,
                           exit_mode=payload.exit_mode, cost=cost)
     result["failed"] = failed
     result["significance"] = summary_stats(result["closed_pnls"])
     result["benchmark"] = benchmark(histories, common, buy_threshold=buy_th, sell_threshold=sell_th,
                                     initial_capital=payload.initial_capital, warmup_days=35,
-                                    backtest_days=payload.days, cost=cost)
+                                    backtest_days=bdays, cost=cost)
 
     if payload.persist:
         for t in result["trades"]:

@@ -10,6 +10,10 @@ DEFAULT_GRID: dict[str, list[int]] = {"threshold": [2, 3, 4]}
 
 MIN_TRADES = 30   # これ未満は統計的に不十分（誤差範囲）
 
+# leave-one-out 寄与度の対象指標（in-sample で各指標を外した時の損益差を測る）
+_ABLATABLE = ["rsi", "ma_cross", "macd", "bbands", "stoch", "candle_pattern",
+              "disparity", "obv", "cci", "volume_filter", "weekly_trend_filter"]
+
 
 def summary_stats(pnls: list[float], min_trades: int = MIN_TRADES) -> dict:
     """クローズ済みトレード損益（コスト込み）から統計サマリを返す。"""
@@ -31,15 +35,20 @@ def summary_stats(pnls: list[float], min_trades: int = MIN_TRADES) -> dict:
 
 
 def benchmark(histories, configs, *, buy_threshold, sell_threshold,
-              initial_capital, warmup_days, backtest_days, cost=None) -> dict:
-    """評価窓のベンチマーク2種。(a) ユニバース等加重 buy&hold、(b) 全シグナル等加重（素のシグナル運用）。"""
+              initial_capital, warmup_days, backtest_days, cost=None,
+              eval_start_date=None) -> dict:
+    """評価窓のベンチマーク2種。(a) ユニバース等加重 buy&hold、(b) 全シグナル等加重（素のシグナル運用）。
+
+    eval_start_date 指定時は評価窓をその日以降（out-of-sample）に限定する。戦略の評価窓と揃える。
+    """
     from backtest import run_backtest
 
     cost = cost or DEFAULT_COST
-    # (a) buy&hold：評価窓（末尾 backtest_days 日）の頭→末リターンを等加重平均
+    # (a) buy&hold：評価窓の頭→末リターンを等加重平均（OOS指定時は split 以降）
     rets = []
     for df in histories.values():
-        win = df.sort_index().tail(backtest_days)
+        df = df.sort_index()
+        win = df[df.index >= eval_start_date] if eval_start_date is not None else df.tail(backtest_days)
         if len(win) >= 2 and float(win["close"].iloc[0]) > 0:
             rets.append(float(win["close"].iloc[-1]) / float(win["close"].iloc[0]) - 1.0)
     buy_hold_pct = (sum(rets) / len(rets) * 100) if rets else None
@@ -48,7 +57,7 @@ def benchmark(histories, configs, *, buy_threshold, sell_threshold,
     naive = run_backtest(histories, configs=configs, initial_capital=initial_capital,
                          backtest_days=backtest_days, warmup_days=warmup_days,
                          buy_threshold=buy_threshold, sell_threshold=sell_threshold,
-                         exit_mode="score", cost=cost)
+                         exit_mode="score", cost=cost, eval_start_date=eval_start_date)
     return {"buy_hold_pct": buy_hold_pct, "all_signals_pct": naive["pnl_pct"]}
 
 
@@ -100,8 +109,6 @@ def evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=None, cost=Non
     _, best_th, train_r, train_stat, best_row = best
 
     # in-sample 寄与度（leave-one-out・best閾値・train上）。フロント /optimize が表示。
-    _ABLATABLE = ["rsi", "ma_cross", "macd", "bbands", "stoch", "candle_pattern",
-                  "disparity", "obv", "cci", "volume_filter", "weekly_trend_filter"]
     present = {c["rule_type"] for c in configs}
     contributions = []
     for rt in _ABLATABLE:
@@ -116,9 +123,10 @@ def evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=None, cost=Non
     oos_r = _bt(histories, best_th, configs, eval_start=split)
     oos_stat = summary_stats(oos_r["closed_pnls"])
 
+    # ベンチマークも OOS 窓（split 以降）で計算し、戦略の OOS 成績と公平に比較する。
     bench = benchmark(histories, configs, buy_threshold=best_th, sell_threshold=-best_th,
                       initial_capital=initial_capital, warmup_days=warmup_days,
-                      backtest_days=big, cost=cost)
+                      backtest_days=big, cost=cost, eval_start_date=split)
 
     in_expect = train_stat["expectancy"] or 0.0
     oos_expect = oos_stat["expectancy"] or 0.0

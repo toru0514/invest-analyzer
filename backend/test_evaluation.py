@@ -58,6 +58,22 @@ def test_benchmark_returns_two_baselines():
     assert b["buy_hold_pct"] is not None and b["buy_hold_pct"] > 0
 
 
+def test_benchmark_eval_start_date_restricts_to_oos_window():
+    df = _df(n=200)
+    hist = {"X.T": df}
+    split = df.index[int(len(df) * 0.7)]
+    full = benchmark(hist, DEFAULT_CONFIGS, buy_threshold=2, sell_threshold=-2,
+                     initial_capital=3000.0, warmup_days=35, backtest_days=len(df))
+    oos = benchmark(hist, DEFAULT_CONFIGS, buy_threshold=2, sell_threshold=-2,
+                    initial_capital=3000.0, warmup_days=35, backtest_days=len(df),
+                    eval_start_date=split)
+    # OOS の buy&hold は split 以降の頭→末リターン（全期間とは別物）
+    post = df[df.index >= split]
+    expected = (float(post["close"].iloc[-1]) / float(post["close"].iloc[0]) - 1.0) * 100
+    assert abs(oos["buy_hold_pct"] - expected) < 1e-6
+    assert abs(oos["buy_hold_pct"] - full["buy_hold_pct"]) > 1e-9
+
+
 def test_evaluate_holdout_structure_and_no_lookahead():
     hist = {"X.T": _df(n=200), "Y.T": _df(n=200, seed=2)}
     res = evaluate_holdout(hist, DEFAULT_CONFIGS, split_ratio=0.7,
