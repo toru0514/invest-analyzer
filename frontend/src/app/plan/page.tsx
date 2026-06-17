@@ -212,6 +212,14 @@ function PlanCard({
           {row ? "判定: 中立（様子見）。保有は上で管理できます。" : "まだ作戦がありません。「作戦を生成」で判定・価格を取得してください。"}
         </p>
       )}
+
+      {row?.ai_summary && (
+        <AiCommentary
+          summary={row.ai_summary}
+          confidence={row.ai_confidence}
+          risksJson={row.ai_risks}
+        />
+      )}
     </div>
   );
 }
@@ -294,6 +302,43 @@ function PlanMetric({ label, value, cls, accent, sub }: { label: string; value: 
       <div className="text-xs text-slate-500">{label}</div>
       <div className={`text-lg font-semibold ${cls ?? ""}`}>{value}</div>
       {sub && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
+    </div>
+  );
+}
+
+function AiCommentary({
+  summary, confidence, risksJson,
+}: { summary: string; confidence: number | null; risksJson: string | null }) {
+  let risks: string[] = [];
+  if (risksJson) {
+    try {
+      const p = JSON.parse(risksJson);
+      if (Array.isArray(p)) risks = p.map(String);
+    } catch {
+      /* 壊れたJSONは無視 */
+    }
+  }
+  return (
+    <div className="mt-3 rounded border border-indigo-100 bg-indigo-50 p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-xs font-semibold text-indigo-700">AI解説</span>
+        {confidence != null && (
+          <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
+            確信度 {confidence}
+          </span>
+        )}
+      </div>
+      <p className="text-sm text-slate-700">{summary}</p>
+      {risks.length > 0 && (
+        <ul className="mt-1 list-disc pl-5 text-xs text-slate-600">
+          {risks.map((r, i) => (
+            <li key={i}>{r}</li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-1 text-[10px] text-slate-400">
+        AIによる説明であり予測の保証ではありません。
+      </p>
     </div>
   );
 }
