@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from costs import DEFAULT_COST, apply_costs, commission_cost
 from signals import BUY_THRESHOLD, DEFAULT_CONFIGS, SELL_THRESHOLD, build_plan, evaluate
 
 INITIAL_CAPITAL = 3000.0   # 仮想資金（円）
@@ -17,22 +18,23 @@ WARMUP_DAYS = 35           # 指標計算に必要な助走期間
 
 
 def run_backtest(
-    histories: dict[str, pd.DataFrame],
-    configs=None,
-    initial_capital: float = INITIAL_CAPITAL,
-    backtest_days: int = BACKTEST_DAYS,
-    warmup_days: int = WARMUP_DAYS,
-    buy_threshold: int = BUY_THRESHOLD,
-    sell_threshold: int = SELL_THRESHOLD,
-    exit_mode: str = "score",
-) -> dict:
-    """exit_mode='score'（既定）はスコア反転で決済。'atr' は追補版 強化J の出口入り。"""
+    histories, configs=None, initial_capital=INITIAL_CAPITAL,
+    backtest_days=BACKTEST_DAYS, warmup_days=WARMUP_DAYS,
+    buy_threshold=BUY_THRESHOLD, sell_threshold=SELL_THRESHOLD,
+    exit_mode="score", cost=None, eval_start_date=None,
+):
+    """exit_mode='score'（既定）はスコア反転で決済。'plan'（旧'atr'）は提示指値で約定する出口入り。
+
+    cost: {'commission_bps','slippage_bps'}（None で DEFAULT_COST）。
+    eval_start_date: 指定すると約定（取引）はこの日以降のみ。指標窓は全履歴を使う（out-of-sample 用）。
+    """
     if configs is None:
         configs = DEFAULT_CONFIGS
-
-    if exit_mode == "atr":
-        return _run_backtest_atr(histories, configs, initial_capital, backtest_days,
-                                 warmup_days, buy_threshold, sell_threshold)
+    cost = cost or DEFAULT_COST
+    if exit_mode in ("plan", "atr"):
+        return _run_backtest_plan(histories, configs, initial_capital, backtest_days,
+                                  warmup_days, buy_threshold, sell_threshold, cost,
+                                  eval_start_date)
 
     n_tickers = len(histories)
     cash = initial_capital
@@ -46,7 +48,8 @@ def run_backtest(
     signal_rows = []
 
     all_dates = sorted(set().union(*[set(df.index) for df in histories.values()]))
-    eval_dates = all_dates[-backtest_days:]
+    eval_dates = [d for d in all_dates if eval_start_date is None or d >= eval_start_date]
+    eval_dates = eval_dates[-backtest_days:]
 
     for d in eval_dates:
         for ticker, df in histories.items():
@@ -54,27 +57,32 @@ def run_backtest(
             if len(window) < warmup_days:
                 continue
             score, direction, detail = evaluate(window, configs, buy_threshold, sell_threshold)
-            price = float(window["close"].iloc[-1])
+            raw = float(window["close"].iloc[-1])
 
             if direction == "buy" and cash > 0:
-                current_value = holdings[ticker] * price
+                fill = apply_costs(raw, "buy", cost)
+                current_value = holdings[ticker] * fill
                 invest = min(per_trade_budget, cash, max(0.0, per_trade_budget - current_value))
                 if invest >= 1.0:
-                    shares = invest / price
+                    fee = commission_cost(invest, cost)
+                    shares = (invest - fee) / fill
                     total_cost = cost_basis[ticker] * holdings[ticker] + invest
                     holdings[ticker] += shares
                     cost_basis[ticker] = total_cost / holdings[ticker]
                     cash -= invest
                     trades.append({"date": str(pd.Timestamp(d).date()), "ticker": ticker,
-                                   "action": "buy", "price": price, "shares": shares})
+                                   "action": "buy", "price": fill, "shares": shares})
 
             elif direction == "sell" and holdings[ticker] > 0:
+                fill = apply_costs(raw, "sell", cost)
                 shares = holdings[ticker]
-                pnl = (price - cost_basis[ticker]) * shares
-                cash += shares * price
+                proceeds = shares * fill
+                proceeds -= commission_cost(proceeds, cost)
+                pnl = proceeds - cost_basis[ticker] * shares
+                cash += proceeds
                 closed_pnls.append(pnl)
                 trades.append({"date": str(pd.Timestamp(d).date()), "ticker": ticker,
-                               "action": "sell", "price": price, "shares": shares})
+                               "action": "sell", "price": fill, "shares": shares})
                 holdings[ticker] = 0.0
                 cost_basis[ticker] = 0.0
 
@@ -98,108 +106,106 @@ def run_backtest(
     wins = sum(1 for p in closed_pnls if p > 0)
     win_rate = (wins / len(closed_pnls) * 100) if closed_pnls else None
 
-    max_dd = 0.0
-    peak = -np.inf
+    max_dd, peak = 0.0, -np.inf
     for point in equity_curve:
         peak = max(peak, point["equity"])
         if peak > 0:
             max_dd = min(max_dd, (point["equity"] - peak) / peak)
-    max_dd_pct = abs(max_dd) * 100
 
     return {
-        "initial": initial_capital,
-        "final": final_value,
-        "pnl_amount": pnl_amount,
-        "pnl_pct": pnl_pct,
-        "trade_count": len(trades),
-        "closed_trades": len(closed_pnls),
-        "win_rate": win_rate,
-        "max_drawdown_pct": max_dd_pct,
-        "trades": trades,
-        "signals": signal_rows,
-        "equity_curve": equity_curve,
-        "exit_mode": "score",
+        "initial": initial_capital, "final": final_value, "pnl_amount": pnl_amount,
+        "pnl_pct": pnl_pct, "trade_count": len(trades), "closed_trades": len(closed_pnls),
+        "closed_pnls": closed_pnls, "win_rate": win_rate, "max_drawdown_pct": abs(max_dd) * 100,
+        "trades": trades, "signals": signal_rows, "equity_curve": equity_curve,
+        "exit_mode": "score", "cost": cost, "fill_rate": None,
     }
 
 
-def _run_backtest_atr(histories, configs, initial_capital, backtest_days,
-                      warmup_days, buy_threshold, sell_threshold) -> dict:
-    """追補版 強化J: 提案指値で約定し、ATR の損切/利確ラインで決済する出口入りシミュレーション。
+def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
+                       warmup_days, buy_threshold, sell_threshold, cost, eval_start_date):
+    """提示指値（build_plan）で約定し、ATR の損切/利確で決済する出口入りシミュレーション。
 
-    銘柄ごとに資金を等分（initial/銘柄数）し、各銘柄は同時に1ポジションのみ持つ簡易モデル。
-    - エントリー: buy シグナルの翌営業日、その日の安値が提案指値に達したら指値で約定。
-    - 決済: 保有中に当日安値が損切ラインに達したら損切、当日高値が利確ラインに達したら利確。
-      逆方向（sell）シグナルが出たらその日の終値で決済。
-    - look-ahead 回避: 判定は当日終値まで、執行は翌日以降の OHLC のみ参照。
+    検証=提示：作戦ボードと同一の limit_price/stop_price/target_price で約定検証する。
+    eval_start_date 指定時は約定をその日以降に限定（指標窓は全履歴）。
     """
-    n = len(histories)
-    budget = initial_capital / max(n, 1)
+    entry_expiry_days = 5
     trades = []
     closed = []          # {pnl, reason, days}
     equity_by_date: dict[str, float] = {}
     signal_rows = []
     final_value = 0.0
+    orders_placed = 0
+    orders_filled = 0
 
     for ticker, df in histories.items():
         df = df.sort_index()
-        cash = budget
+        cash = initial_capital / max(len(histories), 1)
         shares = 0.0
         entry_price = stop = target = None
         entry_i = None
-        pending = None   # {"limit","stop","target","expires"} 押し目指値（GTC）
+        pending = None   # {"limit","stop","target","expires"}
         start = max(warmup_days, len(df) - backtest_days)
 
         for i in range(start, len(df)):
             row = df.iloc[i]
             d = str(pd.Timestamp(df.index[i]).date())
             low, high, close = float(row["low"]), float(row["high"]), float(row["close"])
+            in_window = eval_start_date is None or df.index[i] >= eval_start_date
 
-            # 1) 押し目指値の約定（買いシグナル翌日以降・有効期限内に安値が指値に達したら約定）
-            if shares == 0 and pending is not None and cash > 0:
+            # 1) 提示指値の約定（有効期限内に安値が指値に達したら約定・コスト適用）
+            if in_window and shares == 0 and pending is not None and cash > 0:
                 if low <= pending["limit"]:
-                    fill = pending["limit"]
-                    shares = cash / fill
+                    fill = apply_costs(pending["limit"], "buy", cost)
+                    fee = commission_cost(cash, cost)
+                    shares = (cash - fee) / fill
                     entry_price, stop, target, entry_i = fill, pending["stop"], pending["target"], i
                     cash = 0.0
+                    orders_filled += 1
                     trades.append({"date": d, "ticker": ticker, "action": "buy",
                                    "price": fill, "shares": shares})
                     pending = None
                 elif i >= pending["expires"]:
                     pending = None   # 期限切れ（約定せず失効）
 
-            # 2) 保有中（エントリー当日を除く）: 損切優先で stop/target をチェック
+            # 2) 保有中（エントリー当日を除く）：損切優先で stop/target をチェック
             if shares > 0 and entry_i is not None and i > entry_i:
-                exit_price, reason = (stop, "stop") if low <= stop else \
+                exit_raw, reason = (stop, "stop") if low <= stop else \
                     (target, "target") if high >= target else (None, None)
-                if exit_price is not None:
-                    closed.append({"pnl": (exit_price - entry_price) * shares,
+                if exit_raw is not None:
+                    fill = apply_costs(exit_raw, "sell", cost)
+                    proceeds = shares * fill
+                    proceeds -= commission_cost(proceeds, cost)
+                    closed.append({"pnl": proceeds - entry_price * shares,
                                    "reason": reason, "days": i - entry_i})
-                    cash += shares * exit_price
+                    cash += proceeds
                     trades.append({"date": d, "ticker": ticker, "action": "sell",
-                                   "price": exit_price, "shares": shares})
+                                   "price": fill, "shares": shares})
                     shares = 0.0; entry_price = stop = target = None; entry_i = None
 
-            # 3) 当日終値で判定（意思決定）
+            # 3) 当日終値で判定（意思決定）。指標窓は全履歴 df.iloc[:i+1]。
             window = df.iloc[:i + 1]
             if len(window) >= warmup_days:
                 score, direction, _ = evaluate(window, configs, buy_threshold, sell_threshold)
                 if shares > 0 and direction == "sell":
-                    closed.append({"pnl": (close - entry_price) * shares,
+                    fill = apply_costs(close, "sell", cost)
+                    proceeds = shares * fill
+                    proceeds -= commission_cost(proceeds, cost)
+                    closed.append({"pnl": proceeds - entry_price * shares,
                                    "reason": "signal", "days": i - entry_i})
-                    cash += shares * close
+                    cash += proceeds
                     trades.append({"date": d, "ticker": ticker, "action": "sell",
-                                   "price": close, "shares": shares})
+                                   "price": fill, "shares": shares})
                     shares = 0.0; entry_price = stop = target = None; entry_i = None
-                elif shares == 0 and direction == "buy":
+                elif in_window and shares == 0 and direction == "buy":
                     plan = build_plan(window, "buy", score, configs)
-                    atr = plan["atr"]
-                    if atr and plan["stop_price"] and plan["target_price"]:
-                        # シミュレーションの約定はハーフATRの押し目（reachable）で待つ。
-                        # 作戦ボードの提案指値（サポート基準）は人間向けの別物。
-                        pending = {"limit": close - 0.5 * atr, "stop": plan["stop_price"],
-                                   "target": plan["target_price"], "expires": i + 5}
+                    if plan["limit_price"] and plan["stop_price"] and plan["target_price"]:
+                        # 検証=提示：作戦ボードと同一の提示指値で待つ。
+                        pending = {"limit": plan["limit_price"], "stop": plan["stop_price"],
+                                   "target": plan["target_price"], "expires": i + entry_expiry_days}
+                        orders_placed += 1
 
-            equity_by_date[d] = equity_by_date.get(d, 0.0) + cash + shares * close
+            if in_window:
+                equity_by_date[d] = equity_by_date.get(d, 0.0) + cash + shares * close
 
         last_close = float(df["close"].iloc[-1])
         final_value += cash + shares * last_close
@@ -207,8 +213,7 @@ def _run_backtest_atr(histories, configs, initial_capital, backtest_days,
         signal_rows.append({"ticker": ticker, "price": last_close, "score": score,
                             "direction": direction, "detail": detail})
 
-    equity_curve = [{"date": d, "equity": equity_by_date[d]}
-                    for d in sorted(equity_by_date)]
+    equity_curve = [{"date": d, "equity": equity_by_date[d]} for d in sorted(equity_by_date)]
     pnls = [c["pnl"] for c in closed]
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p <= 0]
@@ -225,21 +230,16 @@ def _run_backtest_atr(histories, configs, initial_capital, backtest_days,
             max_dd = min(max_dd, (point["equity"] - peak) / peak)
 
     return {
-        "initial": initial_capital,
-        "final": final_value,
+        "initial": initial_capital, "final": final_value,
         "pnl_amount": final_value - initial_capital,
         "pnl_pct": (final_value - initial_capital) / initial_capital * 100,
-        "trade_count": len(trades),
-        "closed_trades": len(closed),
-        "win_rate": win_rate,
-        "max_drawdown_pct": abs(max_dd) * 100,
-        "trades": trades,
-        "signals": signal_rows,
-        "equity_curve": equity_curve,
-        "exit_mode": "atr",
+        "trade_count": len(trades), "closed_trades": len(closed),
+        "closed_pnls": pnls, "win_rate": win_rate, "max_drawdown_pct": abs(max_dd) * 100,
+        "trades": trades, "signals": signal_rows, "equity_curve": equity_curve,
+        "exit_mode": "plan", "cost": cost,
+        "fill_rate": (orders_filled / orders_placed) if orders_placed else None,
         "take_profit_count": sum(1 for c in closed if c["reason"] == "target"),
         "stop_loss_count": sum(1 for c in closed if c["reason"] == "stop"),
         "signal_exit_count": sum(1 for c in closed if c["reason"] == "signal"),
-        "avg_holding_days": avg_holding,
-        "risk_reward": risk_reward,
+        "avg_holding_days": avg_holding, "risk_reward": risk_reward,
     }

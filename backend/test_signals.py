@@ -200,7 +200,7 @@ def test_atr_exit_backtest_has_extra_metrics():
     hist = {tk: synthetic_history(tk, seed=i)
             for i, tk in enumerate(["8306.T", "7203.T", "9984.T", "6758.T"])}
     r = run_backtest(hist, exit_mode="atr")
-    assert r["exit_mode"] == "atr"
+    assert r["exit_mode"] == "plan"   # atr は plan のエイリアス（約定=提示指値）
     for key in ("take_profit_count", "stop_loss_count", "signal_exit_count",
                 "avg_holding_days", "risk_reward", "equity_curve"):
         assert key in r

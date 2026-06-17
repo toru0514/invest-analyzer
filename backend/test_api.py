@@ -216,7 +216,7 @@ def test_backtest_atr_exit_mode(client):
     r = client.post("/backtest", json={"demo": True, "days": 60, "exit_mode": "atr"})
     assert r.status_code == 200
     res = r.json()
-    assert res["exit_mode"] == "atr"
+    assert res["exit_mode"] == "plan"   # atr は plan のエイリアス（約定=提示指値）
     for key in ("take_profit_count", "stop_loss_count", "signal_exit_count",
                 "avg_holding_days", "risk_reward"):
         assert key in res
