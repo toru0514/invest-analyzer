@@ -123,7 +123,15 @@ export default function Settings() {
 
   async function addStock(e: React.FormEvent) {
     e.preventDefault();
-    if (!ticker.trim() || !name.trim()) return;
+    setError(null);
+    if (!ticker.trim()) {
+      setError("ティッカー（銘柄コード・例: 8306.T）を入力してください。日本株は末尾に .T を付けます。");
+      return;
+    }
+    if (!name.trim()) {
+      setError("銘柄名を入力してください。");
+      return;
+    }
     try {
       await api.addWatch(ticker.trim(), name.trim());
       setTicker("");

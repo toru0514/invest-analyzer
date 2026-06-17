@@ -75,12 +75,22 @@ export default function PlanBoard() {
 
   async function addStock(e: React.FormEvent) {
     e.preventDefault();
-    if (!newTicker.trim() || !newName.trim()) return;
+    setError(null);
+    const t = newTicker.trim();
+    const n = newName.trim();
+    if (!t) {
+      setError("ティッカー（銘柄コード・例: 8306.T）を入力してください。日本株は末尾に .T を付けます。");
+      return;
+    }
+    if (!n) {
+      setError("銘柄名を入力してください（例: 三菱UFJフィナンシャル・グループ）。");
+      return;
+    }
     try {
-      await api.addWatch(newTicker.trim(), newName.trim());
+      await api.addWatch(t, n);
       setNewTicker("");
       setNewName("");
-      setStatus("銘柄を追加しました。「作戦を生成」で判定・価格を取得してください。");
+      setStatus(`${t}（${n}）を追加しました。「作戦を生成」で判定・価格を取得してください。`);
       await load();
     } catch (e) {
       setError(String(e));
@@ -150,7 +160,7 @@ export default function PlanBoard() {
       </form>
 
       {status && <p className="mb-3 rounded bg-slate-100 px-3 py-2 text-sm text-slate-700">{status}</p>}
-      {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}（Python API :8000 を確認）</p>}
+      {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       <p className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
         提案指値は「人間が証券アプリで注文を置くための数字」です。発注・自動売買は行いません。
