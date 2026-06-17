@@ -84,21 +84,33 @@ export type Holding = { ticker: string; shares: number; avg_cost: number };
 
 export type SweepRow = {
   threshold: number;
-  exit_mode: "score" | "atr";
   pnl_pct: number;
+  expectancy: number | null;
   win_rate: number | null;
   trade_count: number;
-  max_drawdown_pct: number;
 };
 export type ContribRow = { rule_type: string; pnl_without: number; delta: number };
+export type Significance = {
+  n: number; expectancy: number | null; std_error: number | null; win_rate: number | null;
+  avg_win: number | null; avg_loss: number | null; insufficient: boolean;
+};
 export type OptimizeResponse = {
-  sweep: SweepRow[];
-  best: SweepRow | null;
-  baseline_pnl_pct: number;
-  contributions: ContribRow[];
+  chosen_params: { threshold: number; exit_mode: string };
+  in_sample: {
+    sample: "in_sample"; sweep: SweepRow[]; best: SweepRow | null;
+    baseline_pnl_pct: number; contributions: ContribRow[];
+    pnl_pct: number; expectancy: number | null; trade_count: number; win_rate: number | null;
+  };
+  out_of_sample: {
+    sample: "out_of_sample"; pnl_pct: number; expectancy: number | null;
+    win_rate: number | null; trade_count: number; fill_rate: number | null;
+  };
+  overfit_gap: number;
+  significance: Significance;
+  benchmark: { buy_hold_pct: number | null; all_signals_pct: number };
+  split_date: string | null;
   failed: string[];
   tickers: string[];
-  days: number;
 };
 
 export type BacktestResult = {
@@ -113,13 +125,17 @@ export type BacktestResult = {
   trades: { date: string; ticker: string; action: string; price: number; shares: number }[];
   signals: { ticker: string; price: number; score: number; direction: Direction; detail: Record<string, number | string> }[];
   equity_curve: { date: string; equity: number }[];
-  exit_mode?: "score" | "atr";
-  // exit_mode === "atr"（出口入りシミュレーション・強化J）でのみ返る追加成績
+  exit_mode?: "score" | "plan";
+  // exit_mode === "plan"（出口入りシミュレーション・強化J）でのみ返る追加成績
   take_profit_count?: number;
   stop_loss_count?: number;
   signal_exit_count?: number;
   avg_holding_days?: number | null;
   risk_reward?: number | null;
+  cost?: { commission_bps: number; slippage_bps: number };
+  fill_rate?: number | null;
+  significance?: Significance;
+  benchmark?: { buy_hold_pct: number | null; all_signals_pct: number };
   failed?: string[];
 };
 
@@ -172,7 +188,7 @@ export const api = {
     req<{ updated: RefreshRow[]; failed: string[]; note: string | null }>(
       `/refresh?demo=${demo}`, { method: "POST" }),
 
-  backtest: (body: { tickers?: string[]; initial_capital?: number; days?: number; demo?: boolean; persist?: boolean; exit_mode?: "score" | "atr" }) =>
+  backtest: (body: { tickers?: string[]; initial_capital?: number; days?: number; demo?: boolean; persist?: boolean; exit_mode?: "score" | "plan"; period?: string }) =>
     req<BacktestResult>("/backtest", { method: "POST", body: JSON.stringify(body) }),
 
   getPlan: (date?: string) =>
@@ -180,7 +196,7 @@ export const api = {
   generatePlan: (demo: boolean) =>
     req<PlanResponse>(`/plan/generate?demo=${demo}`, { method: "POST" }),
 
-  optimize: (body: { days?: number; demo?: boolean; tickers?: string[] }) =>
+  optimize: (body: { demo?: boolean; tickers?: string[]; split_ratio?: number; period?: string }) =>
     req<OptimizeResponse>("/optimize", { method: "POST", body: JSON.stringify(body) }),
 
   getHoldings: () => req<Holding[]>("/holdings"),

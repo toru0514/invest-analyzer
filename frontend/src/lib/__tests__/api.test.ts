@@ -28,13 +28,24 @@ describe("api client", () => {
   });
 
   it("optimize は POST /optimize にボディを送る", async () => {
-    const f = mockFetch({ sweep: [], best: null, baseline_pnl_pct: 0, contributions: [], failed: [], tickers: [], days: 40 });
+    const f = mockFetch({
+      chosen_params: { threshold: 2, exit_mode: "plan" },
+      in_sample: { sample: "in_sample", sweep: [], best: null, baseline_pnl_pct: 0,
+                   contributions: [], pnl_pct: 0, expectancy: null, trade_count: 0, win_rate: null },
+      out_of_sample: { sample: "out_of_sample", pnl_pct: 0, expectancy: null, win_rate: null,
+                       trade_count: 0, fill_rate: null },
+      overfit_gap: 0,
+      significance: { n: 0, expectancy: null, std_error: null, win_rate: null,
+                      avg_win: null, avg_loss: null, insufficient: true },
+      benchmark: { buy_hold_pct: null, all_signals_pct: 0 },
+      split_date: null, failed: [], tickers: [],
+    });
     vi.stubGlobal("fetch", f);
-    await api.optimize({ days: 30, demo: true });
+    await api.optimize({ demo: true, split_ratio: 0.7 });
     const [url, init] = f.mock.calls[0];
     expect(url).toBe("http://localhost:8000/optimize");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({ days: 30, demo: true });
+    expect(JSON.parse(init.body)).toEqual({ demo: true, split_ratio: 0.7 });
   });
 
   it("レスポンスが ok でないとき例外を投げる", async () => {

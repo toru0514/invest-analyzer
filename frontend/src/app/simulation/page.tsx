@@ -30,7 +30,7 @@ export default function Simulation() {
     try {
       const r = await api.backtest({
         initial_capital: capital, days, demo, persist,
-        exit_mode: atrExit ? "atr" : "score",
+        exit_mode: atrExit ? "plan" : "score",
       });
       setResult(r);
     } catch (e) {
@@ -115,7 +115,7 @@ export default function Simulation() {
             <Metric label="最大ドローダウン" value={`${result.max_drawdown_pct.toFixed(2)}%`} />
           </section>
 
-          {result.exit_mode === "atr" && (
+          {result.exit_mode === "plan" && (
             <section className="mb-6">
               <h2 className="mb-2 text-sm font-semibold text-slate-600">ATR出口の内訳（強化J）</h2>
               <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
