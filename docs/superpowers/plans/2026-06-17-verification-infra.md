@@ -1092,6 +1092,23 @@ export type OptimizeResponse = {
     req<OptimizeResponse>("/optimize", { method: "POST", body: JSON.stringify(body) }),
 ```
 
+さらに `/backtest` の `exit_mode` リテラルを `"plan"` 対応に（`atr`→`plan` 改名の追従）。`BacktestResult`（`api.ts:116`）と `api.backtest`（`api.ts:175`）を更新（新キーは任意で型に追加）：
+
+```typescript
+// BacktestResult（api.ts:104-）：exit_mode を plan に、追加キーを任意で
+  exit_mode?: "score" | "plan";
+  cost?: { commission_bps: number; slippage_bps: number };
+  fill_rate?: number | null;
+  significance?: Significance;
+  benchmark?: { buy_hold_pct: number | null; all_signals_pct: number };
+```
+
+```typescript
+// api.backtest（api.ts:175）：送信ボディの exit_mode を plan に
+  backtest: (body: { tickers?: string[]; initial_capital?: number; days?: number; demo?: boolean; persist?: boolean; exit_mode?: "score" | "plan"; period?: string }) =>
+    req<BacktestResult>("/backtest", { method: "POST", body: JSON.stringify(body) }),
+```
+
 - [ ] **Step 4: ページを新形に書き換え** — `frontend/src/app/optimize/page.tsx` 全体を以下に置換
 
 ```tsx
@@ -1271,6 +1288,19 @@ export default function Optimize() {
 }
 ```
 
+- [ ] **Step 4b: `/backtest`（simulation）ページの exit_mode 追従** — `frontend/src/app/simulation/page.tsx`
+
+`atr`→`plan` 改名で「ATR出口の内訳（強化J）」セクションが**無言で消える**のを防ぐ（自動テストでは検出されない）。2箇所を変更：
+
+```tsx
+// :33 送信値（チェック時は plan を送る）
+        exit_mode: atrExit ? "plan" : "score",
+```
+```tsx
+// :118 内訳セクションの表示条件
+          {result.exit_mode === "plan" && (
+```
+
 - [ ] **Step 5: テスト＋型チェック＋コミット**
 
 ```bash
@@ -1278,9 +1308,12 @@ npm --prefix frontend test
 # Expected: 全 vitest グリーン
 cd frontend && npx tsc --noEmit && cd ..
 # Expected: 型エラーなし
-git add frontend/src/lib/api.ts frontend/src/lib/__tests__/api.test.ts frontend/src/app/optimize/page.tsx
-git commit -m "feat(ui): /optimize をホールドアウト応答に追従（OOS見出し・in-sample参考表示）"
+git add frontend/src/lib/api.ts frontend/src/lib/__tests__/api.test.ts \
+        frontend/src/app/optimize/page.tsx frontend/src/app/simulation/page.tsx
+git commit -m "feat(ui): /optimize と /backtest を新検証応答に追従（OOS見出し・ATR内訳のplan対応）"
 ```
+
+> 手動確認（自動テスト対象外）：simulation 画面で「ATR出口」チェック→実行時に「ATR出口の内訳」が表示されること。
 
 ---
 
@@ -1292,6 +1325,7 @@ git commit -m "feat(ui): /optimize をホールドアウト応答に追従（OOS
 - `/backtest` 応答に `cost`/`fill_rate`/`significance`/`benchmark`。
 - `/optimize` が **in-sample 選定 → out-of-sample 評価** の2段構えで、`overfit_gap`・`significance`・`benchmark` を返す。
 - フロント `/optimize` が新レスポンス形で動作し（OOS を見出し表示）、`npm --prefix frontend test` がグリーン・`tsc --noEmit` が型エラーなし。
+- フロント `/backtest`（simulation）が `exit_mode="plan"` に追従し、ATR出口の内訳が引き続き表示される（手動確認）。
 
 ## スコープ外（将来）
 - ローリング walk-forward、価格キャッシュ最適化、流動性フィルター、リスクベースのサイジング、leave-one-out 寄与度の in_sample 復活、フロント表示の追従。
