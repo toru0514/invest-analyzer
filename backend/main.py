@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
@@ -15,10 +17,11 @@ from pydantic import BaseModel
 
 import db
 import stocks_jp
+from ai_commentary import generate_commentary
 from backtest import run_backtest
-from market import fetch_name, get_history
+from market import fetch_earnings_days, fetch_name, get_history
 from scheduler import DailyScheduler
-from signals import build_plan, evaluate, resolve_configs
+from signals import build_plan, evaluate, resolve_configs, weekly_trend
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -302,6 +305,16 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
     # ticker 別 + 全銘柄共通(NULL) の設定を組み合わせる
     common = [c for c in all_configs if c["ticker"] is None]
 
+    # 地合い（指数トレンド）を1回だけ取得し全銘柄で使い回す（best-effort）
+    index_trend = None
+    try:
+        index_ticker = os.environ.get("GEMINI_INDEX_TICKER", "^N225")
+        idx_df = get_history(index_ticker, period=period, demo=demo)
+        if not idx_df.empty:
+            index_trend = weekly_trend(idx_df)
+    except Exception:
+        index_trend = None
+
     results = []
     failed = []
     for w in watch:
@@ -328,11 +341,26 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
         # 作戦ボード（強化4）: 翌営業日の提案指値・出口を生成して保存
         plan = build_plan(df, direction, score, ticker_cfgs)
         plan_date = _next_business_day(date)
+
+        # AI解説（Gemini・無料枠・best-effort）。キー無し/失敗は None で従来どおり。
+        days_to_earnings = None if demo else fetch_earnings_days(ticker)
+        commentary = generate_commentary(
+            {"ticker": ticker, "name": w["name"], "direction": direction,
+             "score": score, "detail": detail, "vol_ratio": detail.get("vol_ratio"),
+             "weekly_trend": detail.get("weekly_trend"), "close": last_close,
+             "limit_price": plan["limit_price"], "stop_price": plan["stop_price"],
+             "target_price": plan["target_price"]},
+            {"index_trend": index_trend, "days_to_earnings": days_to_earnings},
+        )
+
         db.upsert_plan({
             "ticker": ticker, "plan_date": plan_date, "direction": direction, "score": score,
             "vol_ratio": detail.get("vol_ratio"), "weekly_trend": detail.get("weekly_trend"),
             "limit_price": plan["limit_price"], "stop_price": plan["stop_price"],
             "target_price": plan["target_price"], "rationale": plan["rationale"],
+            "ai_summary": commentary["summary"] if commentary else None,
+            "ai_confidence": commentary["confidence"] if commentary else None,
+            "ai_risks": json.dumps(commentary["risks"], ensure_ascii=False) if commentary else None,
         })
 
         results.append({"id": sid, "ticker": ticker, "date": date, "price": last_close,
