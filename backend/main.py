@@ -472,14 +472,10 @@ def backtest(payload: BacktestIn):
 # ---------------------------------------------------------------------------
 class OptimizeIn(BaseModel):
     tickers: Optional[list[str]] = None
-    days: int = 40
     demo: bool = False
     initial_capital: float = 3000.0
-
-
-# スコアに影響する指標（leave-one-out で寄与度を測る対象）
-_ABLATABLE = ["rsi", "ma_cross", "macd", "bbands", "stoch", "candle_pattern",
-              "disparity", "obv", "cci", "volume_filter", "weekly_trend_filter"]
+    period: str = "3y"
+    split_ratio: float = 0.7
 
 
 @app.post("/optimize")
@@ -487,51 +483,17 @@ def optimize(payload: OptimizeIn):
     tickers = payload.tickers or [w["ticker"] for w in db.list_watchlist(only_enabled=True)]
     if not tickers:
         raise HTTPException(status_code=400, detail="対象銘柄がありません")
-
-    histories = {}
-    failed = []
+    histories, failed = {}, []
     for t in tickers:
-        df = get_history(t, demo=payload.demo)
-        if df.empty:
-            failed.append(t)
-        else:
-            histories[t] = df
+        df = get_history(t, period=payload.period, demo=payload.demo)
+        (histories.__setitem__(t, df) if not df.empty else failed.append(t))
     if not histories:
-        raise HTTPException(status_code=502,
-                            detail="価格データを取得できませんでした（demo=true を試してください）。")
+        raise HTTPException(status_code=502, detail="価格データを取得できませんでした（demo=true を試してください）。")
 
     common = [c for c in db.list_configs(active_only=True) if c["ticker"] is None]
-
-    def bt(configs, buy_th, sell_th, mode):
-        r = run_backtest(histories, configs=configs, initial_capital=payload.initial_capital,
-                         backtest_days=payload.days, buy_threshold=buy_th,
-                         sell_threshold=sell_th, exit_mode=mode)
-        return {"pnl_pct": r["pnl_pct"], "win_rate": r["win_rate"],
-                "trade_count": r["trade_count"], "max_drawdown_pct": r["max_drawdown_pct"]}
-
-    # 1) 閾値スイープ（±2/±3/±4 × score/atr）
-    sweep = []
-    for th in (2, 3, 4):
-        for mode in ("score", "atr"):
-            m = bt(common, th, -th, mode)
-            sweep.append({"threshold": th, "exit_mode": mode, **m})
-    sweep.sort(key=lambda x: (x["pnl_pct"], x["win_rate"] or 0), reverse=True)
-
-    # 2) 指標の寄与度（leave-one-out・既定 ±2 / score）
-    base = bt(common, 2, -2, "score")
-    present = {c["rule_type"] for c in common}
-    contributions = []
-    for rt in _ABLATABLE:
-        if rt not in present:
-            continue
-        without = bt([c for c in common if c["rule_type"] != rt], 2, -2, "score")
-        contributions.append({
-            "rule_type": rt,
-            "pnl_without": without["pnl_pct"],
-            "delta": base["pnl_pct"] - without["pnl_pct"],   # 正＝あると有利
-        })
-    contributions.sort(key=lambda x: x["delta"], reverse=True)
-
-    return {"sweep": sweep, "best": sweep[0] if sweep else None,
-            "baseline_pnl_pct": base["pnl_pct"], "contributions": contributions,
-            "failed": failed, "tickers": list(histories.keys()), "days": payload.days}
+    cost = cost_from_configs(common)
+    res = evaluate_holdout(histories, common, split_ratio=payload.split_ratio, cost=cost,
+                           initial_capital=payload.initial_capital)
+    res["failed"] = failed
+    res["tickers"] = list(histories.keys())
+    return res

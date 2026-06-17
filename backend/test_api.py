@@ -231,3 +231,14 @@ def test_backtest_includes_cost_and_significance(client):
     assert "fill_rate" in res
     assert "significance" in res and "n" in res["significance"]
     assert "benchmark" in res and "buy_hold_pct" in res["benchmark"]
+
+
+def test_optimize_holdout_in_sample_out_of_sample(client):
+    r = client.post("/optimize", json={"demo": True, "split_ratio": 0.7})
+    assert r.status_code == 200
+    res = r.json()
+    assert res["in_sample"]["sample"] == "in_sample"
+    assert res["out_of_sample"]["sample"] == "out_of_sample"
+    assert "overfit_gap" in res
+    assert "significance" in res and "benchmark" in res
+    assert res["chosen_params"]["threshold"] in (2, 3, 4)
