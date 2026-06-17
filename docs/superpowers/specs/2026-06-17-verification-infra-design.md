@@ -85,6 +85,7 @@ cost = {"commission_bps": 0.0, "slippage_bps": 10.0}   # 片道。bps = 0.01%
 3. **約定**：期限内に **当日安値 ≤ `limit_price`** で約定。約定価格はコスト適用後（`apply_costs`）。期限内に未到達なら **未約定＝トレードなし**。
 4. **手仕舞い**：保有中に **安値 ≤ `stop_price`（損切）** / **高値 ≥ `target_price`（利確）** / **sellシグナル（終値）** で決済（コスト適用）。損切り優先。
 5. `close - 0.5*ATR` の特例は**廃止**。`limit_method`（ma/support/atr）はライブと同一設定を使用。
+   - 注：既定 `limit_method="ma"` の buy は `min(ma_val, close)`（`signals.py:451`）なので、指値が当日終値とほぼ同値になり**即日に近い約定が増える**。これは旧 `close-0.5ATR`（押し下げ）からの意図的な挙動変更で、「検証=提示」の核心。テストで `ma` 方式の約定挙動を固定する（§9）。
 6. **約定率 `fill_rate`**（発注数に対する約定数）を成績に併記。
 
 > look-ahead 回避は現状を踏襲：判定は当日終値まで、執行は翌日以降の OHLC のみ参照（`backtest.py:133` の原則を維持）。
@@ -97,7 +98,12 @@ evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=DEFAULT_GRID,
 ```
 
 - **分割**：各銘柄の日付範囲を時系列で train=前半 `split_ratio`／test=後半 `1-split_ratio` に分ける。warmup は各区間内で確保。train と test の評価期間は**時系列で重ならない**。
-- **in-sample 選定**：`grid`（既定は閾値 `{2,3,4}` × `exit_mode` 程度の控えめなグリッド）を train 上で `run_backtest` し、**コスト込み期待値**が最大のパラメータを選ぶ（同点は trade数・勝率で）。
+- **既定グリッド（具体化）**：
+  ```
+  DEFAULT_GRID = {"threshold": [2, 3, 4]}   # buy=+t / sell=-t。exit_mode は "plan"（検証=提示）に固定
+  ```
+  v1 では閾値のみを探索する（現行 `/optimize` の閾値スイープに対応）。`limit_method`・`entry_expiry_days` 等は探索せず既定固定（YAGNI、将来拡張）。score モードは最適化対象に含めず、ベンチマーク的に別途併記してよい。
+- **in-sample 選定**：`DEFAULT_GRID` を train 上で `run_backtest` し、**コスト込み期待値**が最大のパラメータを選ぶ（同点は trade数・勝率で）。
 - **out-of-sample 評価**：選んだパラメータで test を `run_backtest`。**OOS の期待値が見出し数値**。
 - **過学習ギャップ**：`in_sample_expectancy - oos_expectancy` を併記（大きく落ちる＝過学習の警告フラグ）。
 - 戻り値：`{chosen_params, in_sample:{...}, out_of_sample:{...}, overfit_gap, significance, benchmark}`。
@@ -125,8 +131,22 @@ evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=DEFAULT_GRID,
 
 ### 6.2 `/optimize`（ホールドアウト2段構え）
 - `OptimizeIn` に `period: str = "3y"`、`split_ratio: float = 0.7` を追加。
-- 内部を `evaluate_holdout` 呼び出しに置換。応答：`in_sample`（chosen_params＋指標）、`out_of_sample`（見出し）、`overfit_gap`、`significance`、`benchmark`。
-- 既存の `sweep` / `contributions` は **train（in-sample）上で計算**して保持し、見出しは OOS とする（誤読防止のためラベルを明示）。
+- 内部を `evaluate_holdout` 呼び出しに置換。応答は in-sample と out-of-sample を**明確に分離したフィールド**で返す（見出し誤読防止）：
+  ```
+  {
+    "in_sample":  {"sample": "in_sample", "chosen_params": {...},
+                   "sweep": [...], "contributions": [...],
+                   "best": {...}, "baseline_pnl_pct": ..., "expectancy": ..., "pnl_pct": ...},
+    "out_of_sample": {"sample": "out_of_sample",            // ← 見出し（このアプリの真の成績）
+                      "expectancy": ..., "pnl_pct": ..., "win_rate": ...,
+                      "trade_count": ..., "fill_rate": ...},
+    "overfit_gap": in_sample.expectancy - out_of_sample.expectancy,
+    "significance": {...},   // OOS トレードに対して
+    "benchmark": {...},      // OOS 期間
+    "failed": [...], "tickers": [...]
+  }
+  ```
+- 既存の `sweep` / `contributions` / `best` / `baseline_pnl_pct` は **`in_sample` 配下に移動**（train 上で計算）。各々 `sample:"in_sample"` の文脈に属し、トップレベル見出しにはしない。フロントは `out_of_sample` を見出しとして表示する。
 
 ### 6.3 共通
 - demo モード（合成データ）は引き続き動作（ネット非依存テストを維持）。
@@ -154,6 +174,7 @@ evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=DEFAULT_GRID,
 
 - `costs.py`：買い/売り方向の補正、手数料計算、ゼロコスト同値性。
 - `backtest.py`：指値到達で約定（指値＋スリッページ）、未到達＆期限切れで未約定、stop/target 決済、`fill_rate` 計算、コストで pnl が下がること。
+  - **既定 `limit_method="ma"` の約定挙動を固定**：指値が当日終値とほぼ同値になり即日に近い約定が起きること（旧 `close-0.5ATR` の押し下げが廃止されたこと）を明示的に検証する（§5.2注）。
 - `evaluation.py`：
   - ホールドアウト分割が時系列で重ならない／test のパラメータは train のみから選ばれる（look-ahead無し）。
   - `summary_stats` の標準誤差・`n<30` 警告。
