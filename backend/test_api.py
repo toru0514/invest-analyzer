@@ -220,3 +220,14 @@ def test_backtest_atr_exit_mode(client):
     for key in ("take_profit_count", "stop_loss_count", "signal_exit_count",
                 "avg_holding_days", "risk_reward"):
         assert key in res
+
+
+def test_backtest_includes_cost_and_significance(client):
+    r = client.post("/backtest", json={"demo": True, "days": 60, "exit_mode": "plan"})
+    assert r.status_code == 200
+    res = r.json()
+    assert res["exit_mode"] == "plan"
+    assert "cost" in res and res["cost"]["slippage_bps"] == 10.0
+    assert "fill_rate" in res
+    assert "significance" in res and "n" in res["significance"]
+    assert "benchmark" in res and "buy_hold_pct" in res["benchmark"]

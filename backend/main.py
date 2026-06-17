@@ -19,6 +19,8 @@ import db
 import stocks_jp
 from ai_commentary import generate_commentary
 from backtest import run_backtest
+from costs import cost_from_configs
+from evaluation import benchmark, evaluate_holdout, summary_stats
 from market import fetch_earnings_days, fetch_name, get_history
 from scheduler import DailyScheduler
 from signals import build_plan, evaluate, resolve_configs, weekly_trend
@@ -78,11 +80,12 @@ class ConfigUpdateList(BaseModel):
 
 class BacktestIn(BaseModel):
     tickers: Optional[list[str]] = None
-    initial_capital: float = 3000.0
-    days: int = 22
     demo: bool = False
+    days: int = 22
+    initial_capital: float = 3000.0
+    exit_mode: str = "plan"      # 既定を plan（検証=提示）に
     persist: bool = False
-    exit_mode: str = "score"   # "score"（スコア反転で決済）/ "atr"（ATR出口入り・強化J）
+    period: str = "3y"
 
 
 # ---------------------------------------------------------------------------
@@ -434,36 +437,33 @@ def backtest(payload: BacktestIn):
     if not tickers:
         raise HTTPException(status_code=400, detail="対象銘柄がありません")
 
-    configs = db.list_configs(active_only=True)
-    common = [c for c in configs if c["ticker"] is None]
-
     histories = {}
     failed = []
     for t in tickers:
-        df = get_history(t, demo=payload.demo)
+        df = get_history(t, period=payload.period, demo=payload.demo)
         if df.empty:
             failed.append(t)
             continue
         histories[t] = df
-
     if not histories:
-        raise HTTPException(
-            status_code=502,
-            detail="価格データを取得できませんでした（ネットワーク制限時は demo=true）。")
+        raise HTTPException(status_code=502, detail="価格データを取得できませんでした（demo=true を試してください）。")
 
     buy_th, sell_th = db.get_thresholds()
-    result = run_backtest(histories, configs=common,
-                          initial_capital=payload.initial_capital,
-                          backtest_days=payload.days,
-                          buy_threshold=buy_th, sell_threshold=sell_th,
-                          exit_mode=payload.exit_mode)
+    configs = db.list_configs(active_only=True)
+    common = [c for c in configs if c["ticker"] is None]
+    cost = cost_from_configs(common)
+    result = run_backtest(histories, configs=common, initial_capital=payload.initial_capital,
+                          backtest_days=payload.days, buy_threshold=buy_th, sell_threshold=sell_th,
+                          exit_mode=payload.exit_mode, cost=cost)
     result["failed"] = failed
+    result["significance"] = summary_stats(result["closed_pnls"])
+    result["benchmark"] = benchmark(histories, common, buy_threshold=buy_th, sell_threshold=sell_th,
+                                    initial_capital=payload.initial_capital, warmup_days=35,
+                                    backtest_days=payload.days, cost=cost)
 
     if payload.persist:
         for t in result["trades"]:
-            db.insert_paper_trade(t["ticker"], t["action"], t["price"],
-                                  t["shares"], t["date"])
-
+            db.insert_paper_trade(t["ticker"], t["action"], t["price"], t["shares"], t["date"])
     return result
 
 
