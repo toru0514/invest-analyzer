@@ -48,6 +48,26 @@ def test_watchlist_crud(client):
     assert client.get("/watchlist").json().__len__() == 4
 
 
+def test_stock_search_and_name_resolution(client):
+    # 名前で検索
+    hits = client.get("/stocks/search?q=トヨタ").json()
+    assert any(h["ticker"] == "7203.T" for h in hits)
+    # コードで検索
+    hits2 = client.get("/stocks/search?q=6501").json()
+    assert any(h["ticker"] == "6501.T" and "日立" in h["name"] for h in hits2)
+    # 内蔵マスタからの名前解決（コード '6501' → '6501.T'）
+    nm = client.get("/stocks/name?ticker=6501").json()
+    assert nm["ticker"] == "6501.T" and nm["name"] == "日立製作所" and nm["source"] == "master"
+
+
+def test_add_watch_resolves_name_when_blank(client):
+    # name 省略・コードだけ → サーバが内蔵マスタから名前を補完し .T も付与
+    created = client.post("/watchlist", json={"ticker": "6501"}).json()
+    assert created["ticker"] == "6501.T"
+    assert created["name"] == "日立製作所"
+    client.delete(f"/watchlist/{created['id']}")
+
+
 def test_config_crud_and_price_target(client):
     configs = client.get("/config").json()
     indicators = [c for c in configs if c["rule_type"] != "price_target"]

@@ -14,10 +14,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import db
+import stocks_jp
 from backtest import run_backtest
-from market import get_history
+from market import fetch_name, get_history
 from scheduler import DailyScheduler
 from signals import build_plan, evaluate, resolve_configs
+
+
+def _normalize_ticker(ticker: str) -> str:
+    """'6501' → '6501.T' のように東証コードを正規化する。"""
+    t = ticker.strip().upper()
+    if t.isdigit():        # 数字だけなら東証とみなして .T を付与
+        return f"{t}.T"
+    return t
 
 _scheduler: DailyScheduler | None = None
 
@@ -50,7 +59,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 class WatchlistIn(BaseModel):
     ticker: str
-    name: str
+    name: str = ""    # 空なら内蔵マスタ／yfinance から自動解決
 
 
 class ConfigUpdate(BaseModel):
@@ -137,16 +146,40 @@ def get_watchlist():
     return db.list_watchlist()
 
 
+def _resolve_name(ticker: str) -> str:
+    """銘柄名を内蔵マスタ→yfinance の順で解決。取れなければティッカーを返す。"""
+    return stocks_jp.lookup_name(ticker) or fetch_name(ticker) or ticker
+
+
 @app.post("/watchlist")
 def post_watchlist(item: WatchlistIn):
-    new_id = db.add_watchlist(item.ticker.strip(), item.name.strip())
-    return {"id": new_id, "ticker": item.ticker, "name": item.name}
+    ticker = _normalize_ticker(item.ticker)
+    name = item.name.strip() or _resolve_name(ticker)
+    new_id = db.add_watchlist(ticker, name)
+    return {"id": new_id, "ticker": ticker, "name": name}
 
 
 @app.delete("/watchlist/{item_id}")
 def remove_watchlist(item_id: int):
     db.delete_watchlist(item_id)
     return {"deleted": item_id}
+
+
+@app.get("/stocks/search")
+def stocks_search(q: str = Query("")):
+    """内蔵マスタを名前/コードで検索（追加候補の自動補完用）。"""
+    return stocks_jp.search(q)
+
+
+@app.get("/stocks/name")
+def stocks_name(ticker: str = Query(...)):
+    """ティッカーから銘柄名を解決（内蔵マスタ→yfinance）。追加前のプレビュー用。"""
+    t = _normalize_ticker(ticker)
+    name = stocks_jp.lookup_name(t)
+    if name:
+        return {"ticker": t, "name": name, "source": "master"}
+    fetched = fetch_name(t)
+    return {"ticker": t, "name": fetched or "", "source": "yfinance" if fetched else "none"}
 
 
 # ---------------------------------------------------------------------------

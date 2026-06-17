@@ -26,6 +26,12 @@
 
 ## 進捗まとめ（やったこと / まだなこと / これからやること）
 
+> **2026-06 更新（Phase 9 = 銘柄の検索追加）**:
+>
+> - **名前/コードで検索して選択 → 追加**（作戦ボード・設定）。内蔵の主要日本株マスタ（`stocks_jp.py`・日本語名）で
+>   オートコンプリート。リストに無い銘柄は **コードだけ入力すれば名前を yfinance から自動取得**（`POST /watchlist` は
+>   name 省略可、`6501`→`6501.T` も自動正規化）。`GET /stocks/search`・`GET /stocks/name` を追加。
+>
 > **2026-06 更新（Phase 8.1 = 保有銘柄の出口表示）**:
 >
 > - **保有している銘柄は、判定が中立でも ATR ベースの利確/損切（出口の目安）を表示**。
@@ -235,8 +241,10 @@ make frontend     # = cd frontend && npm run dev
 | メソッド | パス | 役割 |
 |---|---|---|
 | GET | `/watchlist` | 監視銘柄一覧 |
-| POST | `/watchlist` | 銘柄追加 |
+| POST | `/watchlist` | 銘柄追加（name 省略時は内蔵マスタ／yfinance で自動解決、コードは .T 自動付与） |
 | DELETE | `/watchlist/{id}` | 銘柄削除 |
+| GET | `/stocks/search?q=` | 内蔵マスタを名前/コードで検索（追加候補の補完） |
+| GET | `/stocks/name?ticker=` | ティッカー→銘柄名の解決（内蔵マスタ→yfinance） |
 | GET | `/config` / PUT `/config` | signal_config の取得・更新（重み/有効/params） |
 | POST | `/config` / DELETE `/config/{id}` | signal_config の追加・削除（指定金額アラート用） |
 | GET | `/settings` / PUT `/settings` | スコア閾値・スケジューラ設定（`app_meta`） |

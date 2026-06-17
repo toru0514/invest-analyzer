@@ -135,10 +135,13 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getWatchlist: () => req<WatchItem[]>("/watchlist"),
-  addWatch: (ticker: string, name: string) =>
+  // name 省略時はサーバが内蔵マスタ／yfinance から自動解決する
+  addWatch: (ticker: string, name = "") =>
     req<WatchItem>("/watchlist", { method: "POST", body: JSON.stringify({ ticker, name }) }),
   deleteWatch: (id: number) =>
     req<{ deleted: number }>(`/watchlist/${id}`, { method: "DELETE" }),
+  searchStocks: (q: string) =>
+    req<{ ticker: string; name: string }[]>(`/stocks/search?q=${encodeURIComponent(q)}`),
 
   getConfig: () => req<SignalConfig[]>("/config"),
   updateConfig: (updates: { id: number; weight?: number; enabled?: boolean; params?: Record<string, unknown> }[]) =>
