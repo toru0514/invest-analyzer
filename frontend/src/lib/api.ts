@@ -72,6 +72,9 @@ export type PlanRow = {
   stop_price: number | null;
   target_price: number | null;
   rationale: string | null;
+  ai_summary: string | null;
+  ai_confidence: number | null;
+  ai_risks: string | null; // JSON文字列化された string[]
   created_at: string;
 };
 
