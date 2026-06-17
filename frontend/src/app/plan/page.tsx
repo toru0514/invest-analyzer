@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api, Holding, PlanRow, WatchItem } from "@/lib/api";
 import DirectionBadge from "@/components/DirectionBadge";
 import Disclaimer from "@/components/Disclaimer";
+import StockAddSearch from "@/components/StockAddSearch";
 
 const TREND_LABEL: Record<string, string> = { up: "↑ 上昇", down: "↓ 下降", flat: "→ 横ばい" };
 const TREND_CLASS: Record<string, string> = {
@@ -30,10 +31,6 @@ export default function PlanBoard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-
-  // 銘柄追加フォーム
-  const [newTicker, setNewTicker] = useState("");
-  const [newName, setNewName] = useState("");
 
   async function load() {
     setError(null);
@@ -70,30 +67,6 @@ export default function PlanBoard() {
       setError(String(e));
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function addStock(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    const t = newTicker.trim();
-    const n = newName.trim();
-    if (!t) {
-      setError("ティッカー（銘柄コード・例: 8306.T）を入力してください。日本株は末尾に .T を付けます。");
-      return;
-    }
-    if (!n) {
-      setError("銘柄名を入力してください（例: 三菱UFJフィナンシャル・グループ）。");
-      return;
-    }
-    try {
-      await api.addWatch(t, n);
-      setNewTicker("");
-      setNewName("");
-      setStatus(`${t}（${n}）を追加しました。「作戦を生成」で判定・価格を取得してください。`);
-      await load();
-    } catch (e) {
-      setError(String(e));
     }
   }
 
@@ -148,16 +121,10 @@ export default function PlanBoard() {
         </div>
       </div>
 
-      {/* 銘柄追加 */}
-      <form onSubmit={addStock} className="mb-3 flex flex-wrap items-center gap-2 rounded border bg-white px-3 py-2 text-sm">
-        <span className="text-xs font-semibold text-slate-500">銘柄を追加</span>
-        <input value={newTicker} onChange={(e) => setNewTicker(e.target.value)} placeholder="ティッカー（例: 6501.T）"
-          className="rounded border px-2 py-1" />
-        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="銘柄名（例: 日立製作所）"
-          className="rounded border px-2 py-1" />
-        <button className="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-700">追加</button>
-        <span className="text-xs text-slate-400">追加後は「作戦を生成」で判定・価格を取得</span>
-      </form>
+      {/* 銘柄追加（検索して選択 / コード入力） */}
+      <div className="mb-3">
+        <StockAddSearch onAdded={load} />
+      </div>
 
       {status && <p className="mb-3 rounded bg-slate-100 px-3 py-2 text-sm text-slate-700">{status}</p>}
       {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

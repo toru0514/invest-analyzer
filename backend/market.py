@@ -53,3 +53,18 @@ def get_history(ticker: str, period: str = "6mo", demo: bool = False) -> pd.Data
         return fetch_history(ticker, period=period)
     except Exception:
         return pd.DataFrame()
+
+
+def fetch_name(ticker: str) -> str | None:
+    """yfinance から銘柄名を取得（取れなければ None）。内蔵マスタに無い銘柄の補完用。"""
+    try:
+        import yfinance as yf
+
+        info = yf.Ticker(ticker).info or {}
+        for key in ("longName", "shortName", "displayName"):
+            v = info.get(key)
+            if v:
+                return str(v)
+    except Exception:
+        pass
+    return None

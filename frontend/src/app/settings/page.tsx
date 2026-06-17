@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, AppSettings, SignalConfig, WatchItem } from "@/lib/api";
 import Disclaimer from "@/components/Disclaimer";
+import StockAddSearch from "@/components/StockAddSearch";
 
 const RULE_LABELS: Record<string, string> = {
   rsi: "RSI（売られすぎ/買われすぎ）",
@@ -90,8 +91,6 @@ export default function Settings() {
   const [watch, setWatch] = useState<WatchItem[]>([]);
   const [configs, setConfigs] = useState<SignalConfig[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [ticker, setTicker] = useState("");
-  const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
@@ -119,27 +118,6 @@ export default function Settings() {
   function flash(msg: string) {
     setSaved(msg);
     setTimeout(() => setSaved(null), 2500);
-  }
-
-  async function addStock(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    if (!ticker.trim()) {
-      setError("ティッカー（銘柄コード・例: 8306.T）を入力してください。日本株は末尾に .T を付けます。");
-      return;
-    }
-    if (!name.trim()) {
-      setError("銘柄名を入力してください。");
-      return;
-    }
-    try {
-      await api.addWatch(ticker.trim(), name.trim());
-      setTicker("");
-      setName("");
-      await load();
-    } catch (e) {
-      setError(String(e));
-    }
   }
 
   async function removeStock(id: number) {
@@ -258,21 +236,9 @@ export default function Settings() {
       {/* 監視銘柄 */}
       <section className="mb-8 rounded border bg-white p-4">
         <h2 className="mb-3 font-semibold">監視銘柄</h2>
-        <form onSubmit={addStock} className="mb-4 flex flex-wrap gap-2 text-sm">
-          <input
-            value={ticker}
-            onChange={(e) => setTicker(e.target.value)}
-            placeholder="ティッカー（例: 8306.T）"
-            className="rounded border px-2 py-1"
-          />
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="銘柄名"
-            className="rounded border px-2 py-1"
-          />
-          <button className="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-700">追加</button>
-        </form>
+        <div className="mb-4">
+          <StockAddSearch onAdded={load} />
+        </div>
         <ul className="divide-y text-sm">
           {watch.map((w) => (
             <li key={w.id} className="flex items-center justify-between py-2">
