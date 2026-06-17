@@ -27,6 +27,16 @@ def client():
         yield c
 
 
+@pytest.fixture(autouse=True)
+def _no_gemini(monkeypatch):
+    """テストでは Gemini を呼ばない（ネットワーク非依存を維持・無料枠保護）。
+
+    backend/.env に GEMINI_API_KEY があると ai_commentary が読み込むため、
+    各テストでキーを無効化し generate_commentary を None にする。
+    """
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+
 def test_root_exposes_thresholds(client):
     r = client.get("/")
     assert r.status_code == 200
@@ -160,6 +170,9 @@ def test_plan_generate_and_get(client):
     assert got["plan_date"] == gen["plan_date"]
     tickers = {r["ticker"] for r in got["rows"]}
     assert "8306.T" in tickers
+    # AI解説の列は存在する（GEMINI_API_KEY 未設定なら値は None で従来どおり動作）
+    for r in got["rows"]:
+        assert "ai_summary" in r and "ai_confidence" in r and "ai_risks" in r
     # buy/sell の行は提案指値・出口が埋まっている
     for r in got["rows"]:
         if r["direction"] in ("buy", "sell"):
