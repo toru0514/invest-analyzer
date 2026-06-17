@@ -68,3 +68,24 @@ def fetch_name(ticker: str) -> str | None:
     except Exception:
         pass
     return None
+
+
+def fetch_earnings_days(ticker: str) -> int | None:
+    """直近の将来決算日までの日数（best-effort）。取得不可・無しは None。
+
+    yfinance の決算日は日本株では欠落しがち。例外は握りつぶして None を返す。
+    """
+    try:
+        import yfinance as yf
+
+        df = yf.Ticker(ticker).get_earnings_dates(limit=12)
+        if df is None or df.empty:
+            return None
+        idx = pd.to_datetime(df.index)
+        now = pd.Timestamp.now(tz=idx.tz)
+        future = idx[idx >= now]
+        if len(future) == 0:
+            return None
+        return int((future.min().normalize() - now.normalize()).days)
+    except Exception:
+        return None
