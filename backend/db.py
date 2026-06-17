@@ -91,6 +91,9 @@ CREATE TABLE IF NOT EXISTS daily_plan (
   stop_price    REAL,
   target_price  REAL,
   rationale     TEXT,
+  ai_summary    TEXT,
+  ai_confidence INTEGER,
+  ai_risks      TEXT,
   created_at    TEXT DEFAULT (datetime('now')),
   UNIQUE (ticker, plan_date)
 );
@@ -128,12 +131,21 @@ def get_conn():
         conn.close()
 
 
+def _migrate_daily_plan(conn):
+    """既存 data.db の daily_plan に AI解説の列が無ければ追加（冪等）。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(daily_plan)").fetchall()}
+    for col, decl in (("ai_summary", "TEXT"), ("ai_confidence", "INTEGER"), ("ai_risks", "TEXT")):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE daily_plan ADD COLUMN {col} {decl}")
+
+
 def init_db():
     """スキーマ作成 + 初期データ（watchlist / signal_config）を投入。"""
     from signals import DEFAULT_CONFIGS
 
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        _migrate_daily_plan(conn)
 
         # 監視銘柄が空なら既定を投入
         n = conn.execute("SELECT COUNT(*) AS c FROM watchlist").fetchone()["c"]
@@ -394,18 +406,25 @@ def delete_holding(ticker: str):
 # ---- daily_plan（作戦ボード） ----
 def upsert_plan(row: dict):
     """1銘柄分の作戦を (ticker, plan_date) で upsert。"""
+    row = {**row}
+    for k in ("ai_summary", "ai_confidence", "ai_risks"):
+        row.setdefault(k, None)
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO daily_plan "
             "(ticker, plan_date, direction, score, vol_ratio, weekly_trend, "
-            " limit_price, stop_price, target_price, rationale) "
+            " limit_price, stop_price, target_price, rationale, "
+            " ai_summary, ai_confidence, ai_risks) "
             "VALUES (:ticker, :plan_date, :direction, :score, :vol_ratio, :weekly_trend, "
-            " :limit_price, :stop_price, :target_price, :rationale) "
+            " :limit_price, :stop_price, :target_price, :rationale, "
+            " :ai_summary, :ai_confidence, :ai_risks) "
             "ON CONFLICT(ticker, plan_date) DO UPDATE SET "
             "direction=excluded.direction, score=excluded.score, vol_ratio=excluded.vol_ratio, "
             "weekly_trend=excluded.weekly_trend, limit_price=excluded.limit_price, "
             "stop_price=excluded.stop_price, target_price=excluded.target_price, "
-            "rationale=excluded.rationale, created_at=datetime('now')",
+            "rationale=excluded.rationale, ai_summary=excluded.ai_summary, "
+            "ai_confidence=excluded.ai_confidence, ai_risks=excluded.ai_risks, "
+            "created_at=datetime('now')",
             row)
 
 
