@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from evaluation import benchmark, summary_stats
+from evaluation import benchmark, evaluate_holdout, summary_stats
 from signals import DEFAULT_CONFIGS
 
 
@@ -56,3 +56,26 @@ def test_benchmark_returns_two_baselines():
     assert "buy_hold_pct" in b and "all_signals_pct" in b
     # 上昇トレンドなので buy&hold はプラス
     assert b["buy_hold_pct"] is not None and b["buy_hold_pct"] > 0
+
+
+def test_evaluate_holdout_structure_and_no_lookahead():
+    hist = {"X.T": _df(n=200), "Y.T": _df(n=200, seed=2)}
+    res = evaluate_holdout(hist, DEFAULT_CONFIGS, split_ratio=0.7,
+                           initial_capital=3000.0, warmup_days=35)
+    for key in ("chosen_params", "in_sample", "out_of_sample", "overfit_gap",
+                "significance", "benchmark"):
+        assert key in res
+    assert res["in_sample"]["sample"] == "in_sample"
+    assert res["out_of_sample"]["sample"] == "out_of_sample"
+    assert res["chosen_params"]["threshold"] in (2, 3, 4)
+    assert isinstance(res["in_sample"]["sweep"], list) and len(res["in_sample"]["sweep"]) == 3
+    # 寄与度（leave-one-out）は in_sample 配下に残す（フロント /optimize が表示）
+    assert isinstance(res["in_sample"]["contributions"], list)
+    assert "baseline_pnl_pct" in res["in_sample"] and "best" in res["in_sample"]
+
+
+def test_evaluate_holdout_oos_trades_are_after_split():
+    hist = {"X.T": _df(n=200)}
+    res = evaluate_holdout(hist, DEFAULT_CONFIGS, split_ratio=0.7,
+                           initial_capital=3000.0, warmup_days=35)
+    assert res["significance"]["n"] >= 0

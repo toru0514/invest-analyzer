@@ -50,3 +50,90 @@ def benchmark(histories, configs, *, buy_threshold, sell_threshold,
                          buy_threshold=buy_threshold, sell_threshold=sell_threshold,
                          exit_mode="score", cost=cost)
     return {"buy_hold_pct": buy_hold_pct, "all_signals_pct": naive["pnl_pct"]}
+
+
+def _split_date(histories, split_ratio):
+    """全銘柄の和集合日付で split_ratio の位置の日付を返す。"""
+    import pandas as pd
+    all_dates = sorted(set().union(*[set(df.index) for df in histories.values()]))
+    if not all_dates:
+        return None
+    cut = int(len(all_dates) * split_ratio)
+    cut = max(1, min(cut, len(all_dates) - 1))
+    return all_dates[cut]
+
+
+def evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=None, cost=None,
+                     initial_capital=3000.0, warmup_days=35) -> dict:
+    """シンプルホールドアウト2段構え：train(in-sample) で閾値を選び test(out-of-sample) で評価。
+
+    look-ahead 回避：test 窓のパラメータは train 窓の成績のみから選ぶ。
+    """
+    from backtest import run_backtest
+
+    grid = grid or DEFAULT_GRID
+    cost = cost or DEFAULT_COST
+    split = _split_date(histories, split_ratio)
+
+    # train：各銘柄を split 以前にスライスし、全期間（warmup以降）で評価
+    train_hist = {t: df[df.index < split] for t, df in histories.items()}
+    big = max((len(df) for df in histories.values()), default=0) + 1
+
+    def _bt(hist, th, cfgs, eval_start=None):
+        return run_backtest(hist, configs=cfgs, initial_capital=initial_capital,
+                            backtest_days=big, warmup_days=warmup_days,
+                            buy_threshold=th, sell_threshold=-th, exit_mode="plan",
+                            cost=cost, eval_start_date=eval_start)
+
+    # in-sample 探索：閾値ごとに train 成績（期待値）で最良を選ぶ
+    sweep, best = [], None
+    for th in grid["threshold"]:
+        r = _bt(train_hist, th, configs)
+        stat = summary_stats(r["closed_pnls"])
+        row = {"threshold": th, "pnl_pct": r["pnl_pct"], "expectancy": stat["expectancy"],
+               "trade_count": r["trade_count"], "win_rate": r["win_rate"]}
+        sweep.append(row)
+        key = (row["expectancy"] if row["expectancy"] is not None else -1e18,
+               row["trade_count"], row["win_rate"] or 0)
+        if best is None or key > best[0]:
+            best = (key, th, r, stat, row)
+    _, best_th, train_r, train_stat, best_row = best
+
+    # in-sample 寄与度（leave-one-out・best閾値・train上）。フロント /optimize が表示。
+    _ABLATABLE = ["rsi", "ma_cross", "macd", "bbands", "stoch", "candle_pattern",
+                  "disparity", "obv", "cci", "volume_filter", "weekly_trend_filter"]
+    present = {c["rule_type"] for c in configs}
+    contributions = []
+    for rt in _ABLATABLE:
+        if rt not in present:
+            continue
+        without = _bt(train_hist, best_th, [c for c in configs if c["rule_type"] != rt])
+        contributions.append({"rule_type": rt, "pnl_without": without["pnl_pct"],
+                              "delta": train_r["pnl_pct"] - without["pnl_pct"]})
+    contributions.sort(key=lambda x: x["delta"], reverse=True)
+
+    # out-of-sample：選んだ閾値で全履歴を使い、約定は split 以降のみ
+    oos_r = _bt(histories, best_th, configs, eval_start=split)
+    oos_stat = summary_stats(oos_r["closed_pnls"])
+
+    bench = benchmark(histories, configs, buy_threshold=best_th, sell_threshold=-best_th,
+                      initial_capital=initial_capital, warmup_days=warmup_days,
+                      backtest_days=big, cost=cost)
+
+    in_expect = train_stat["expectancy"] or 0.0
+    oos_expect = oos_stat["expectancy"] or 0.0
+
+    return {
+        "chosen_params": {"threshold": best_th, "exit_mode": "plan"},
+        "in_sample": {"sample": "in_sample", "sweep": sweep, "best": best_row,
+                      "baseline_pnl_pct": train_r["pnl_pct"], "contributions": contributions,
+                      "pnl_pct": train_r["pnl_pct"], "expectancy": train_stat["expectancy"],
+                      "trade_count": train_r["trade_count"], "win_rate": train_r["win_rate"]},
+        "out_of_sample": {"sample": "out_of_sample", "pnl_pct": oos_r["pnl_pct"],
+                          "expectancy": oos_stat["expectancy"], "win_rate": oos_r["win_rate"],
+                          "trade_count": oos_r["trade_count"], "fill_rate": oos_r["fill_rate"]},
+        "overfit_gap": in_expect - oos_expect,
+        "significance": oos_stat,
+        "benchmark": bench,
+        "split_date": str(split.date()) if split is not None else None,
+    }
