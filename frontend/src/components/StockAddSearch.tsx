@@ -69,11 +69,21 @@ export default function StockAddSearch({ onAdded }: { onAdded: () => Promise<voi
     }
   }
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (hits.length > 0) add(hits[0].ticker, hits[0].name);
-    else if (codeTicker) add(codeTicker);
-    else setError("一致する銘柄がありません。コード（例: 8306.T）で入力してください。");
+    if (hits.length > 0) return add(hits[0].ticker, hits[0].name);
+    if (codeTicker) return add(codeTicker);
+    // デバウンス未完了でも、押した時点で確定検索してから判断する
+    const query = q.trim();
+    if (query) {
+      try {
+        const found = await api.searchStocks(query);
+        if (found.length > 0) return add(found[0].ticker, found[0].name);
+      } catch {
+        /* 検索失敗時は下のエラーへ */
+      }
+    }
+    setError("一致する銘柄がありません。コード（例: 8306.T）で入力してください。");
   }
 
   return (
