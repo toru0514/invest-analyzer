@@ -77,13 +77,13 @@ def _generate_text(prompt: str) -> str:
 
     import は実行時のみ（SDK 未導入でも本モジュールの読込・単体テストは通る）。
     """
-    import google.generativeai as genai
+    from google import genai
 
-    genai.configure(api_key=_api_key())
-    model = genai.GenerativeModel(_model_name())
-    resp = model.generate_content(
-        prompt,
-        generation_config={"response_mime_type": "application/json", "temperature": 0.4},
+    client = genai.Client(api_key=_api_key())
+    resp = client.models.generate_content(
+        model=_model_name(),
+        contents=prompt,
+        config={"response_mime_type": "application/json", "temperature": 0.4},
     )
     return resp.text or ""
 
