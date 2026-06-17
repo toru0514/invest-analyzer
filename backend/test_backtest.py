@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from backtest import run_backtest
+from costs import apply_costs
 from signals import DEFAULT_CONFIGS
 
 
@@ -65,3 +66,34 @@ def test_eval_start_date_restricts_trading_window():
     # 約定はすべて split 以降
     for t in r["trades"]:
         assert pd.Timestamp(t["date"]) >= split.normalize()
+
+
+def test_plan_entry_fills_at_build_plan_limit(monkeypatch):
+    """plan モードのエントリーは build_plan の limit_price で約定する（旧 close-0.5*ATR ではない）。
+
+    evaluate と build_plan を固定し、確実に買いシグナル＋到達可能な提示指値を出して
+    「約定価格＝build_plan の limit_price＋スリッページ」を決定論的に検証（設計§5.2 検証=提示）。
+    """
+    import backtest as bt_mod
+
+    df = _trend_up_df(n=80)
+    cost = {"commission_bps": 0.0, "slippage_bps": 10.0}
+    proposed: set[float] = set()
+
+    def fake_plan(window, direction, score, configs=None):
+        # 当日終値より十分高い指値＝翌日ほぼ確実に約定。旧ロジック close-0.5*ATR とは明確に別値。
+        limit = float(window["close"].iloc[-1]) * 1.5
+        proposed.add(round(apply_costs(limit, "buy", cost), 6))
+        return {"limit_price": limit, "stop_price": limit * 0.5,
+                "target_price": limit * 3.0, "atr": 10.0, "rationale": "x"}
+
+    monkeypatch.setattr(bt_mod, "evaluate", lambda *a, **k: (3, "buy", {}))
+    monkeypatch.setattr(bt_mod, "build_plan", fake_plan)
+
+    r = bt_mod.run_backtest({"X.T": df}, configs=DEFAULT_CONFIGS, exit_mode="plan",
+                            backtest_days=40, cost=cost)
+    buys = [t for t in r["trades"] if t["action"] == "buy"]
+    assert buys, "買い約定が発生していること"
+    # 約定価格は build_plan の提示指値＋スリッページ（旧 close-0.5*ATR なら別値になる）
+    for t in buys:
+        assert round(t["price"], 6) in proposed

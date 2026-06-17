@@ -22,7 +22,7 @@ def run_backtest(
     backtest_days=BACKTEST_DAYS, warmup_days=WARMUP_DAYS,
     buy_threshold=BUY_THRESHOLD, sell_threshold=SELL_THRESHOLD,
     exit_mode="score", cost=None, eval_start_date=None,
-):
+) -> dict:
     """exit_mode='score'（既定）はスコア反転で決済。'plan'（旧'atr'）は提示指値で約定する出口入り。
 
     cost: {'commission_bps','slippage_bps'}（None で DEFAULT_COST）。
@@ -122,7 +122,8 @@ def run_backtest(
 
 
 def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
-                       warmup_days, buy_threshold, sell_threshold, cost, eval_start_date):
+                       warmup_days, buy_threshold, sell_threshold, cost,
+                       eval_start_date) -> dict:
     """提示指値（build_plan）で約定し、ATR の損切/利確で決済する出口入りシミュレーション。
 
     検証=提示：作戦ボードと同一の limit_price/stop_price/target_price で約定検証する。
@@ -155,6 +156,7 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
             # 1) 提示指値の約定（有効期限内に安値が指値に達したら約定・コスト適用）
             if in_window and shares == 0 and pending is not None and cash > 0:
                 if low <= pending["limit"]:
+                    # 手数料: エントリーは投入現金(cash)、エグジットは総受取(proceeds)に対して控除
                     fill = apply_costs(pending["limit"], "buy", cost)
                     fee = commission_cost(cash, cost)
                     shares = (cash - fee) / fill
@@ -200,6 +202,7 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                     plan = build_plan(window, "buy", score, configs)
                     if plan["limit_price"] and plan["stop_price"] and plan["target_price"]:
                         # 検証=提示：作戦ボードと同一の提示指値で待つ。
+                        # 毎営業日の買いシグナルで指値を更新（前日の未約定指値は取消＝新規発注扱い）。
                         pending = {"limit": plan["limit_price"], "stop": plan["stop_price"],
                                    "target": plan["target_price"], "expires": i + entry_expiry_days}
                         orders_placed += 1
