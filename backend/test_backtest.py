@@ -97,3 +97,27 @@ def test_plan_entry_fills_at_build_plan_limit(monkeypatch):
     # 約定価格は build_plan の提示指値＋スリッページ（旧 close-0.5*ATR なら別値になる）
     for t in buys:
         assert round(t["price"], 6) in proposed
+
+
+def test_regime_at_is_asof():
+    from backtest import _regime_at
+    s = pd.Series({pd.Timestamp("2026-01-05"): "risk_on",
+                   pd.Timestamp("2026-01-10"): "risk_off"})
+    assert _regime_at(s, pd.Timestamp("2026-01-07")) == "risk_on"   # 直近以前
+    assert _regime_at(s, pd.Timestamp("2026-01-10")) == "risk_off"
+    assert _regime_at(s, pd.Timestamp("2026-01-01")) is None        # 系列開始前 → None
+    assert _regime_at(None, pd.Timestamp("2026-01-07")) is None
+
+
+def test_run_backtest_regime_series_suppresses_risk_off_buys():
+    from signals import regime_series
+    stock = _trend_up_df(n=120, seed=5)
+    idx_close = np.linspace(1300, 1000, 120)            # 同期間の下降指数 → ほぼ risk_off
+    index_df = pd.DataFrame({"open": idx_close, "high": idx_close, "low": idx_close,
+                             "close": idx_close, "volume": np.full(120, 1e6)},
+                            index=stock.index)
+    rs = regime_series(index_df)
+    without = run_backtest({"X.T": stock}, configs=DEFAULT_CONFIGS, exit_mode="plan", backtest_days=60)
+    withr = run_backtest({"X.T": stock}, configs=DEFAULT_CONFIGS, exit_mode="plan", backtest_days=60,
+                         regime_series=rs)
+    assert withr["trade_count"] <= without["trade_count"]   # ゲートはBUY抑制のみ＝増えない

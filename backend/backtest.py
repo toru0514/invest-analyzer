@@ -17,11 +17,19 @@ BACKTEST_DAYS = 22         # 評価営業日数（≒1ヶ月）
 WARMUP_DAYS = 35           # 指標計算に必要な助走期間
 
 
+def _regime_at(regime_series, d):
+    """日次レジーム系列から d 時点（以前）のレジームを返す。None/未来日は None。"""
+    if regime_series is None:
+        return None
+    v = regime_series.asof(d)
+    return None if v is None or (isinstance(v, float) and pd.isna(v)) else v
+
+
 def run_backtest(
     histories, configs=None, initial_capital=INITIAL_CAPITAL,
     backtest_days=BACKTEST_DAYS, warmup_days=WARMUP_DAYS,
     buy_threshold=BUY_THRESHOLD, sell_threshold=SELL_THRESHOLD,
-    exit_mode="score", cost=None, eval_start_date=None,
+    exit_mode="score", cost=None, eval_start_date=None, regime_series=None,
 ) -> dict:
     """exit_mode='score'（既定）はスコア反転で決済。'plan'（旧'atr'）は提示指値で約定する出口入り。
 
@@ -34,7 +42,7 @@ def run_backtest(
     if exit_mode in ("plan", "atr"):
         return _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                                   warmup_days, buy_threshold, sell_threshold, cost,
-                                  eval_start_date)
+                                  eval_start_date, regime_series)
 
     n_tickers = len(histories)
     cash = initial_capital
@@ -56,7 +64,8 @@ def run_backtest(
             window = df[df.index <= d]
             if len(window) < warmup_days:
                 continue
-            score, direction, detail = evaluate(window, configs, buy_threshold, sell_threshold)
+            score, direction, detail = evaluate(window, configs, buy_threshold, sell_threshold,
+                                                regime=_regime_at(regime_series, d))
             raw = float(window["close"].iloc[-1])
 
             if direction == "buy" and cash > 0:
@@ -97,7 +106,8 @@ def run_backtest(
     for ticker, df in histories.items():
         last_close = float(df["close"].iloc[-1])
         final_value += holdings[ticker] * last_close
-        score, direction, detail = evaluate(df, configs, buy_threshold, sell_threshold)
+        score, direction, detail = evaluate(df, configs, buy_threshold, sell_threshold,
+                                            regime=_regime_at(regime_series, df.index[-1]))
         signal_rows.append({"ticker": ticker, "price": last_close,
                             "score": score, "direction": direction, "detail": detail})
 
@@ -123,7 +133,7 @@ def run_backtest(
 
 def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                        warmup_days, buy_threshold, sell_threshold, cost,
-                       eval_start_date) -> dict:
+                       eval_start_date, regime_series=None) -> dict:
     """提示指値（build_plan）で約定し、ATR の損切/利確で決済する出口入りシミュレーション。
 
     検証=提示：作戦ボードと同一の limit_price/stop_price/target_price で約定検証する。
@@ -187,7 +197,8 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
             # 3) 当日終値で判定（意思決定）。指標窓は全履歴 df.iloc[:i+1]。
             window = df.iloc[:i + 1]
             if len(window) >= warmup_days:
-                score, direction, _ = evaluate(window, configs, buy_threshold, sell_threshold)
+                score, direction, _ = evaluate(window, configs, buy_threshold, sell_threshold,
+                                               regime=_regime_at(regime_series, df.index[i]))
                 if shares > 0 and direction == "sell":
                     fill = apply_costs(close, "sell", cost)
                     proceeds = shares * fill
@@ -212,7 +223,8 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
 
         last_close = float(df["close"].iloc[-1])
         final_value += cash + shares * last_close
-        score, direction, detail = evaluate(df, configs, buy_threshold, sell_threshold)
+        score, direction, detail = evaluate(df, configs, buy_threshold, sell_threshold,
+                                            regime=_regime_at(regime_series, df.index[-1]))
         signal_rows.append({"ticker": ticker, "price": last_close, "score": score,
                             "direction": direction, "detail": detail})
 
