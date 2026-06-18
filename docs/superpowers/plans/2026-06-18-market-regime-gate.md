@@ -143,10 +143,10 @@ def regime_series(index_df, **params) -> "pd.Series":
     # --- 地合いレジームの一次ゲート（指数版の足切り） ---
     if regime is not None:
         detail["regime"] = regime
-        rf = _find_cfg(configs, "market_regime")
+        rf = _find_cfg(configs, "market_regime")   # _find_cfg は該当ルールの params dict を返す
         if rf is not None and regime == "risk_off" and direction == "buy":
-            mode = rf["params"].get("mode", "penalty") if "params" in rf else rf.get("mode", "penalty")
-            penalty = int(rf["params"].get("penalty", 2)) if "params" in rf else int(rf.get("penalty", 2))
+            mode = rf.get("mode", "penalty")
+            penalty = int(rf.get("penalty", 2))
             if mode == "block":
                 detail["regime_filter"] = "blocked"
                 direction = "neutral"
@@ -162,7 +162,7 @@ def regime_series(index_df, **params) -> "pd.Series":
 def evaluate(df, configs=None, buy_threshold=BUY_THRESHOLD, sell_threshold=SELL_THRESHOLD,
              regime: str | None = None):
 ```
-> 注：`_find_cfg` は設定 dict をそのまま返す。DEFAULT_CONFIGS のルールは `{"rule_type":..., "params": {...}}` 形、DB 由来も `params` キーを持つため `rf["params"]` で読める。上の三項は両形に対応（保険）。
+> 注：`_find_cfg(configs, rule_type)` は該当ルールの **params dict** を返す（既存 `weekly_trend_filter`/`atr_exit` と同じ使い方）。よって `rf.get("mode")` で直接読む（`rf["params"]` ではない）。
 
 `DEFAULT_CONFIGS` リストに次の1行を追加（`weekly_trend_filter` の行の近く）：
 ```python
@@ -171,15 +171,17 @@ def evaluate(df, configs=None, buy_threshold=BUY_THRESHOLD, sell_threshold=SELL_
      "weight": 1, "enabled": 1},
 ```
 
+さらに、`DEFAULT_CONFIGS` への追加で DB シードの共通設定が1件増える（`db.py:158-177` が `DEFAULT_CONFIGS` を投入・バックフィル）。既存テスト `backend/test_api.py`（`test_config_crud_and_price_target`、`:83-85`）の `assert len(indicators) == 12` を **`== 13`** に更新し、直上コメントの指標数（「…＝12」）も 13 に合わせる。
+
 - [ ] **Step 4: 成功確認**
 
-Run: `backend/venv/bin/python -m pytest backend/test_signals.py -q`
-Expected: PASS（既存＋regime テスト）
+Run: `backend/venv/bin/python -m pytest backend/test_signals.py backend/test_api.py -q`
+Expected: PASS（test_signals の既存＋regime テスト、test_api は config 件数 13 で緑）
 
 - [ ] **Step 5: コミット**
 
 ```bash
-git add backend/signals.py backend/test_signals.py
+git add backend/signals.py backend/test_signals.py backend/test_api.py
 git commit -m "feat: 地合いレジーム判定とevaluateの一次ゲート（market_regime/regime_series）"
 ```
 
@@ -236,7 +238,7 @@ def _regime_at(regime_series, d):
     return None if v is None or (isinstance(v, float) and pd.isna(v)) else v
 ```
 
-`run_backtest` のシグネチャに `regime_series=None` を追加。dispatch で `_run_backtest_plan(..., regime_series)` を渡す。
+`run_backtest` のシグネチャに `regime_series=None` を追加。**dispatch（`backtest.py:35-37` の `_run_backtest_plan(...)` 呼び出し）の末尾に `regime_series` を渡す**（plan モードへ確実に伝播させる）。
 score モードの2つの `evaluate` 呼び出しを更新：
 - 意思決定（旧59行）：`evaluate(window, configs, buy_threshold, sell_threshold, regime=_regime_at(regime_series, d))`
 - signal_rows（旧100行）：`evaluate(df, configs, buy_threshold, sell_threshold, regime=_regime_at(regime_series, df.index[-1]))`
@@ -342,9 +344,8 @@ import に追加（既存 `from signals import ...` 群へ）：`market_regime, 
 共通 helper を追加（モジュール内）：
 ```python
 def _regime_params(common: list[dict]) -> dict:
-    rp = _find_cfg(common, "market_regime")
-    p = (rp.get("params", {}) if rp else {}) or {}
-    return {k: p[k] for k in ("sma", "dd_lookback", "dd_threshold") if k in p}
+    rp = _find_cfg(common, "market_regime")   # _find_cfg は params dict を返す
+    return {k: rp[k] for k in ("sma", "dd_lookback", "dd_threshold") if rp and k in rp}
 
 
 def _fetch_regime_series(period: str, demo: bool, common: list[dict]):
