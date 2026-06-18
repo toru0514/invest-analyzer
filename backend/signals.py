@@ -234,21 +234,32 @@ def cci_value(df: pd.DataFrame, length: int = 20) -> float | None:
     return float((tp.iloc[-1] - mean) / (0.015 * mad))
 
 
+# 相関でグルーピング（打ち手4）。グループ内は合算→±GROUP_CAP にクリップして多重カウントを止める。
+INDICATOR_GROUP = {
+    "ma_cross": "trend", "macd": "trend",
+    "rsi": "contrarian", "bbands": "contrarian", "stoch": "contrarian",
+    "disparity": "contrarian", "cci": "contrarian",
+    "obv": "volume",
+    "candle_pattern": "pattern",
+}
+GROUP_CAP = 1   # グループ内の最大寄与（±）
+
+
 def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[int, dict]:
-    """指標列が計算済みの DataFrame の最終行をスコアリングする（状態ベース）。
+    """指標列が計算済みの DataFrame の最終行をスコアリング（状態ベース・グループ化）。
 
-    設計（v2）: 「クロスした当日だけ」発火するエッジ型では 3 指標同時発火がまず
-    起きず、閾値 ±3 にほぼ到達しなかった。そこで各指標を毎営業日の“状態”で評価する：
-
-      - トレンド系（ma_cross / macd）: 並び・符号で常時 ±w を出す連続スコア。
-      - 逆張り系（rsi / stoch / bbands）: 売られすぎ→+w / 買われすぎ→-w のゾーン判定。
-        → 上昇トレンド中の押し目で +1 が乗り score が +3 に届く、という
-          スイングらしい「順張りの押し目買い / 戻り売り」が定常的に成立する。
-      - ローソク足パターン: 出現は稀なのでボーナス（エッジ）として加点。
-
+    各指標は ±weight を出すが、相関グループ（順張り/逆張り/需給/パターン）ごとに合算して
+    ±GROUP_CAP にクリップしてから合算する。これにより逆張り系5指標の多重カウントを止める。
     すべて当日までのデータのみ参照（look-ahead bias なし）。
     """
-    score, detail = 0, {}
+    group_raw: dict[str, int] = {}
+    detail: dict = {}
+
+    def _add(rt: str, key: str, v: int):
+        detail[key] = v
+        g = INDICATOR_GROUP.get(rt, rt)
+        group_raw[g] = group_raw.get(g, 0) + v
+
     for cfg in configs:
         if not cfg.get("enabled", 1):
             continue
@@ -263,35 +274,32 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[
             if rsi is None:
                 continue
             if rsi < p.get("low", 30):
-                score += w; detail["rsi"] = +w
+                _add(rt, "rsi", +w)
             elif rsi > p.get("high", 70):
-                score -= w; detail["rsi"] = -w
+                _add(rt, "rsi", -w)
 
         elif rt == "ma_cross":
-            # 状態: 短期MA > 長期MA を上昇トレンド、< を下降トレンドとして常時評価。
             short, long = p.get("short", 5), p.get("long", 25)
             if len(df) >= long:
                 cs = _sma(df["close"], short).iloc[-1]
                 cl = _sma(df["close"], long).iloc[-1]
                 if not (pd.isna(cs) or pd.isna(cl)):
                     if cs > cl:
-                        score += w; detail["ma_cross"] = +w
+                        _add(rt, "ma_cross", +w)
                     elif cs < cl:
-                        score -= w; detail["ma_cross"] = -w
+                        _add(rt, "ma_cross", -w)
 
         elif rt == "macd":
-            # 状態: ヒストグラム（MACD - シグナル）の符号でモメンタムの方向を評価。
             f, s, sig = p.get("fast", 12), p.get("slow", 26), p.get("signal", 9)
             hist = _val(df, f"MACDh_{f}_{s}_{sig}", -1)
             if hist is None:
                 continue
             if hist > 0:
-                score += w; detail["macd"] = +w
+                _add(rt, "macd", +w)
             elif hist < 0:
-                score -= w; detail["macd"] = -w
+                _add(rt, "macd", -w)
 
         elif rt == "bbands":
-            # 状態: 終値が下限バンド以下＝売られすぎ→+w、上限バンド以上＝買われすぎ→-w。
             length, std = p.get("length", 20), p.get("std", 2.0)
             lower = f"BBL_{length}_{std}_{std}"
             upper = f"BBU_{length}_{std}_{std}"
@@ -301,34 +309,32 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[
             if None in (cur_close, cur_lower, cur_upper):
                 continue
             if cur_close <= cur_lower:
-                score += w; detail["bbands"] = +w
+                _add(rt, "bbands", +w)
             elif cur_close >= cur_upper:
-                score -= w; detail["bbands"] = -w
+                _add(rt, "bbands", -w)
 
         elif rt == "stoch":
-            # 状態: %K が低位（売られすぎ）→+w、高位（買われすぎ）→-w のゾーン判定。
             k, d = p.get("k", 14), p.get("d", 3)
             ck = _val(df, f"STOCHk_{k}_{d}_3", -1)
             if ck is None:
                 continue
             if ck < p.get("low", 20):
-                score += w; detail["stoch"] = +w
+                _add(rt, "stoch", +w)
             elif ck > p.get("high", 80):
-                score -= w; detail["stoch"] = -w
+                _add(rt, "stoch", -w)
 
         elif rt == "candle_pattern":
-            if (_val(df, "CDL_3WHITESOLDIERS") or 0) > 0:   # 赤三兵
-                score += w; detail["3whitesoldiers"] = +w
-            if (_val(df, "CDL_3BLACKCROWS") or 0) < 0:      # 三羽烏
-                score -= w; detail["3blackcrows"] = -w
-            eng = _val(df, "CDL_ENGULFING") or 0            # 包み足
+            if (_val(df, "CDL_3WHITESOLDIERS") or 0) > 0:
+                _add(rt, "3whitesoldiers", +w)
+            if (_val(df, "CDL_3BLACKCROWS") or 0) < 0:
+                _add(rt, "3blackcrows", -w)
+            eng = _val(df, "CDL_ENGULFING") or 0
             if eng > 0:
-                score += w; detail["engulfing"] = +w
+                _add(rt, "engulfing", +w)
             elif eng < 0:
-                score -= w; detail["engulfing"] = -w
+                _add(rt, "engulfing", -w)
 
         elif rt == "disparity":
-            # 乖離率 = (終値 - MA) / MA * 100。MA から大きく下＝売られすぎ→買い、上＝買われすぎ→売り。
             ma_len = int(p.get("ma", 25))
             ma = _sma(df["close"], ma_len).iloc[-1]
             cur_close = _val(df, "close", -1)
@@ -336,34 +342,34 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[
                 continue
             disp = (cur_close - ma) / ma * 100
             if disp <= p.get("low", -7):
-                score += w; detail["disparity"] = +w
+                _add(rt, "disparity", +w)
             elif disp >= p.get("high", 7):
-                score -= w; detail["disparity"] = -w
+                _add(rt, "disparity", -w)
 
         elif rt == "obv":
-            # 出来高系: OBV が SMA より上＝出来高が上昇を支持→買い、下→売り。
             obv, obv_sma = obv_vs_sma(df, int(p.get("sma", 20)))
             if obv is None:
                 continue
             if obv > obv_sma:
-                score += w; detail["obv"] = +w
+                _add(rt, "obv", +w)
             elif obv < obv_sma:
-                score -= w; detail["obv"] = -w
+                _add(rt, "obv", -w)
 
         elif rt == "cci":
-            # 逆張り: CCI が下限以下＝売られすぎ→買い、上限以上＝買われすぎ→売り。
             cci = cci_value(df, int(p.get("length", 20)))
             if cci is None:
                 continue
             if cci <= p.get("low", -100):
-                score += w; detail["cci"] = +w
+                _add(rt, "cci", +w)
             elif cci >= p.get("high", 100):
-                score -= w; detail["cci"] = -w
+                _add(rt, "cci", -w)
 
         elif rt == "price_target":
-            # スコアとは別経路（即通知）。バックテストのスコアには算入しない。
-            continue
+            continue   # スコア対象外（即通知の別経路）
 
+    groups = {g: max(-GROUP_CAP, min(GROUP_CAP, raw)) for g, raw in group_raw.items()}
+    detail["_groups"] = groups
+    score = sum(groups.values())
     return score, detail
 
 

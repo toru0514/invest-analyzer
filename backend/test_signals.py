@@ -13,7 +13,7 @@ import pandas as pd
 import signals
 from backtest import INITIAL_CAPITAL, run_backtest
 from market import synthetic_history
-from signals import market_regime, regime_series
+from signals import evaluate, DEFAULT_CONFIGS, market_regime, regime_series
 
 
 def test_evaluate_returns_valid_direction():
@@ -59,11 +59,11 @@ def _base_configs():
 
 
 def test_state_based_scoring_reaches_default_threshold():
-    # 状態ベース設計では既定閾値（±2）で売買が成立するはず（v2 の要）。
-    # 出来高/週足フィルターは別途検証するため、ここでは基本6指標で評価する。
+    # グループ化でスコアレンジが ±4 に圧縮されたため、±1（1グループ一致）で約定が出ることを確認。
+    # 実運用の閾値は /optimize(OOS) で決定する。
     hist = {tk: synthetic_history(tk, seed=i)
             for i, tk in enumerate(["8306.T", "7203.T", "9984.T", "6758.T"])}
-    r = run_backtest(hist, configs=_base_configs())
+    r = run_backtest(hist, configs=_base_configs(), buy_threshold=1, sell_threshold=-1)
     assert r["trade_count"] > 0
 
 
@@ -267,6 +267,41 @@ def test_evaluate_regime_off_penalizes_a_buy_signal():
             assert odt["regime_filter"] == -2
             return
     raise AssertionError("buy シグナルの合成データが見つからない（前提を見直す）")
+
+
+def _declining_df(n=80):
+    """単調減少（売られすぎ）で逆張り指標が一斉に買い側へ振れる合成データ。"""
+    close = np.linspace(1500.0, 900.0, n)
+    open_ = close + 2
+    high = np.maximum(open_, close) + 3
+    low = np.minimum(open_, close) - 3
+    vol = np.full(n, 2_000_000.0)
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-01"), periods=n)
+    return pd.DataFrame({"open": open_, "high": high, "low": low,
+                         "close": close, "volume": vol}, index=idx)
+
+
+def test_grouping_clips_high_weight_to_cap():
+    cfgs = [{"rule_type": "rsi", "params": {"length": 14, "low": 30, "high": 70},
+             "weight": 3, "enabled": 1}]
+    score, direction, detail = evaluate(_declining_df(), cfgs, 2, -2)
+    assert detail.get("rsi") == 3                  # 個別寄与は重み3のまま
+    assert detail["_groups"]["contrarian"] == 1    # グループは cap=1 にクリップ
+    assert score == 1
+
+
+def test_grouping_caps_contrarian_multicount():
+    score, direction, detail = evaluate(_declining_df(), DEFAULT_CONFIGS, 2, -2)
+    fired = [k for k in ("rsi", "bbands", "stoch", "disparity", "cci") if detail.get(k, 0) > 0]
+    assert len(fired) >= 2, f"複数の逆張り指標が買い側に発火する前提: {fired} / {detail}"
+    assert detail["_groups"]["contrarian"] == 1
+
+
+def test_score_detail_has_groups_within_cap():
+    _, _, detail = evaluate(_declining_df(), DEFAULT_CONFIGS, 2, -2)
+    assert "_groups" in detail and isinstance(detail["_groups"], dict)
+    for g, v in detail["_groups"].items():
+        assert -1 <= v <= 1
 
 
 if __name__ == "__main__":
