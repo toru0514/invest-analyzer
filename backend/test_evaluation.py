@@ -95,3 +95,17 @@ def test_evaluate_holdout_oos_trades_are_after_split():
     res = evaluate_holdout(hist, DEFAULT_CONFIGS, split_ratio=0.7,
                            initial_capital=3000.0, warmup_days=35)
     assert res["significance"]["n"] >= 0
+
+
+def test_evaluate_holdout_accepts_regime_series():
+    from signals import regime_series
+    hist = {"X.T": _df(n=200)}
+    idx_close = np.linspace(1300, 1000, 200)
+    index_df = pd.DataFrame({"open": idx_close, "high": idx_close, "low": idx_close,
+                             "close": idx_close, "volume": np.full(200, 1e6)},
+                            index=hist["X.T"].index)
+    rs = regime_series(index_df)
+    res = evaluate_holdout(hist, DEFAULT_CONFIGS, split_ratio=0.7, regime_series=rs,
+                           initial_capital=3000.0, warmup_days=35)
+    assert res["out_of_sample"]["sample"] == "out_of_sample"
+    assert "benchmark" in res
