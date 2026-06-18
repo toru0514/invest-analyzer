@@ -29,7 +29,8 @@
 - Modify: `backend/signals.py`（`_score_indicators` ~237-367・直前に定数追加）
 - Test: `backend/test_signals.py`
 
-- [ ] **Step 1: 失敗テストを追記** — `backend/test_signals.py`（`numpy as np`・`pandas as pd`・`from signals import evaluate, DEFAULT_CONFIGS` は打ち手3で導入済み。無ければ追加）
+- [ ] **Step 1: 失敗テストを追記** — `backend/test_signals.py`
+  - import 確認：`numpy as np`・`pandas as pd`・`import signals` はトップにあるが、`evaluate`/`DEFAULT_CONFIGS` は**関数内ローカル import のみ**（モジュールトップに無い）。新テストは bare で使うので、**トップレベルに `from signals import evaluate, DEFAULT_CONFIGS` を追加**する（既存のローカル import はそのままで可）。
 
 ```python
 def _declining_df(n=80):
@@ -223,10 +224,18 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[
 
 Run: `backend/venv/bin/python -m pytest backend/test_signals.py -q`
 - まず新規グループ化テストが PASS することを確認。
-- 既存テストで**実際に落ちたものだけ**「グループ化後の期待値」に最小更新（設計§6：単一指標の `score == 1` 系は通る見込み・先回り編集はしない）。落ちた場合は detail/score を実値に合わせて修正。
+- **確定的に壊れる既存テスト1件**：`test_state_based_scoring_reaches_default_threshold`（`:61`）。`_base_configs()`＋既定±2・22日窓では、多重カウント解消でスコアが ±2 に届かず `trade_count == 0` になり `assert r["trade_count"] > 0` が失敗する（設計どおりの帰結）。**意図（グループ化後もスコアリングが約定可能な信号を生む）を保ったまま** ±1 へ修正する：
+  ```python
+  # グループ化でスコアレンジが ±4 に圧縮されたため、±1（1グループ一致）で約定が出ることを確認。
+  # 実運用の閾値は /optimize(OOS) で決定する。
+  r = run_backtest(hist, configs=_base_configs(), buy_threshold=1, sell_threshold=-1)
+  assert r["trade_count"] > 0
+  ```
+  （アサーションを単に弱める／削除するのではなく、上記のように閾値を明示し意図を残すこと。）
+- 他の既存テストは設計§6どおり**実行して実際に落ちたものだけ**最小更新（単一指標の `score == 1` 系は通る見込み・先回り編集はしない）。
 
 Run（全体）: `backend/venv/bin/python -m pytest backend/ -q`
-Expected: 全件 PASS（既存82＋新規3。更新が要るものは最小修正後に緑）。
+Expected: 全件 PASS（既存82のうち上記1件を更新＋新規3＝85前後）。
 
 - [ ] **Step 5: コミット**
 
