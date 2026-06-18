@@ -7,9 +7,13 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
+
 import signals
 from backtest import INITIAL_CAPITAL, run_backtest
 from market import synthetic_history
+from signals import market_regime, regime_series
 
 
 def test_evaluate_returns_valid_direction():
@@ -207,6 +211,62 @@ def test_atr_exit_backtest_has_extra_metrics():
     # 決済回数の内訳は closed_trades と整合する
     assert (r["take_profit_count"] + r["stop_loss_count"] + r["signal_exit_count"]
             == r["closed_trades"])
+
+
+def _idx(closes):
+    closes = np.asarray(closes, dtype=float)
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-01"), periods=len(closes))
+    return pd.DataFrame({"open": closes, "high": closes, "low": closes,
+                         "close": closes, "volume": np.full(len(closes), 1e6)}, index=idx)
+
+
+def test_market_regime_uptrend_low_dd_is_risk_on():
+    assert market_regime(_idx(np.linspace(1000, 1300, 120))) == "risk_on"
+
+
+def test_market_regime_downtrend_is_risk_off():
+    assert market_regime(_idx(np.linspace(1300, 1000, 120))) == "risk_off"
+
+
+def test_market_regime_high_drawdown_is_risk_off():
+    closes = list(np.linspace(1000, 1300, 110)) + list(np.linspace(1300, 1100, 10))
+    assert market_regime(_idx(closes)) == "risk_off"
+
+
+def test_market_regime_short_series_is_neutral():
+    assert market_regime(_idx([1000, 1010, 1005])) == "neutral"
+
+
+def test_regime_series_is_causal_and_aligned():
+    df = _idx(np.linspace(1000, 1300, 60))
+    s = regime_series(df)
+    assert len(s) == len(df)
+    for i in (10, 30, 59):
+        assert s.iloc[i] == market_regime(df.iloc[:i + 1])
+
+
+def test_evaluate_regime_records_and_no_change_when_not_risk_off():
+    from signals import evaluate, DEFAULT_CONFIGS
+    from market import synthetic_history
+    df = synthetic_history("X.T", seed=3)
+    base = evaluate(df, DEFAULT_CONFIGS, 2, -2)
+    on = evaluate(df, DEFAULT_CONFIGS, 2, -2, regime="risk_on")
+    assert on[2]["regime"] == "risk_on"
+    assert (on[0], on[1]) == (base[0], base[1])
+
+
+def test_evaluate_regime_off_penalizes_a_buy_signal():
+    from signals import evaluate, DEFAULT_CONFIGS
+    from market import synthetic_history
+    for seed in range(20):
+        df = synthetic_history("X.T", seed=seed)
+        bs, bd, _ = evaluate(df, DEFAULT_CONFIGS, 2, -2)
+        if bd == "buy":
+            os_, od, odt = evaluate(df, DEFAULT_CONFIGS, 2, -2, regime="risk_off")
+            assert os_ == bs - 2
+            assert odt["regime_filter"] == -2
+            return
+    raise AssertionError("buy シグナルの合成データが見つからない（前提を見直す）")
 
 
 if __name__ == "__main__":

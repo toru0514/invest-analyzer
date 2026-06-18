@@ -38,6 +38,10 @@ DEFAULT_CONFIGS: list[dict[str, Any]] = [
     # 追補版の強化（B/C/D）。スコアを多面的に補正する。
     {"rule_type": "volume_filter", "params": {"sma": 20, "surge": 1.5, "quiet": 0.7, "bonus": 1}, "weight": 1, "enabled": 1},
     {"rule_type": "weekly_trend_filter", "params": {"sma": 13, "mode": "penalty"}, "weight": 1, "enabled": 1},
+    # 地合いレジーム（指数版の一次ゲート）: risk_off の買いを penalty/block で抑制する。
+    {"rule_type": "market_regime",
+     "params": {"mode": "penalty", "penalty": 2, "sma": 13, "dd_lookback": 60, "dd_threshold": 0.10},
+     "weight": 1, "enabled": 1},
     {"rule_type": "atr_exit", "params": {"length": 14, "stop_mult": 1.5, "target_mult": 1.5, "limit_method": "ma", "limit_ma": 5, "entry_atr_mult": 0.5, "support_n": 20}, "weight": 1, "enabled": 1},
     # price_target はスコアと独立した「即通知」経路。バックテストのスコアには算入しない。
     # {"rule_type": "price_target", "params": {"above": 1500}, "weight": 1, "enabled": 1},
@@ -162,6 +166,33 @@ def weekly_trend(df: pd.DataFrame, sma: int = 13, lookback: int = 4,
     if chg < -flat_eps:
         return "down"
     return "flat"
+
+
+def market_regime(index_df, *, sma: int = 13, dd_lookback: int = 60,
+                  dd_threshold: float = 0.10) -> str:
+    """指数 OHLCV の最終行時点の地合いレジームを返す: 'risk_on'|'neutral'|'risk_off'。
+
+    呼び出し側が index_df を日付で切ることで look-ahead を回避する。
+    """
+    if index_df is None or len(index_df) < 5:
+        return "neutral"
+    trend = weekly_trend(index_df, sma)
+    closes = index_df["close"].tail(dd_lookback)
+    peak = float(closes.max())
+    last = float(closes.iloc[-1])
+    dd = (peak - last) / peak if peak > 0 else 0.0
+    if trend == "down" or dd >= dd_threshold:
+        return "risk_off"
+    if trend == "up" and dd < dd_threshold / 2:
+        return "risk_on"
+    return "neutral"
+
+
+def regime_series(index_df, **params) -> "pd.Series":
+    """各営業日について「その日までの指数」でのレジームを前計算（look-ahead 安全）。"""
+    idx = index_df.sort_index()
+    return pd.Series({idx.index[i]: market_regime(idx.iloc[:i + 1], **params)
+                      for i in range(len(idx))})
 
 
 def atr_value(df: pd.DataFrame, length: int = 14) -> float | None:
@@ -341,6 +372,7 @@ def evaluate(
     configs: list[dict[str, Any]] | None = None,
     buy_threshold: int = BUY_THRESHOLD,
     sell_threshold: int = SELL_THRESHOLD,
+    regime: str | None = None,
 ):
     """df: OHLCV（小文字列・古い順）。最終行についてスコア判定する。
 
@@ -389,6 +421,21 @@ def evaluate(
             else:  # penalty: 逆方向へ 2 減点して再判定
                 score += -2 if direction == "buy" else 2
                 detail["weekly_filter"] = -2 if direction == "buy" else 2
+                direction = _direction(score)
+
+    # --- 地合いレジームの一次ゲート（指数版の足切り） ---
+    if regime is not None:
+        detail["regime"] = regime
+        rf = _find_cfg(configs, "market_regime")   # _find_cfg は params dict を返す
+        if rf is not None and regime == "risk_off" and direction == "buy":
+            mode = rf.get("mode", "penalty")
+            penalty = int(rf.get("penalty", 2))
+            if mode == "block":
+                detail["regime_filter"] = "blocked"
+                direction = "neutral"
+            else:
+                score -= penalty
+                detail["regime_filter"] = -penalty
                 direction = _direction(score)
 
     return score, direction, detail

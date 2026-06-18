@@ -81,8 +81,8 @@ def test_add_watch_resolves_name_when_blank(client):
 def test_config_crud_and_price_target(client):
     configs = client.get("/config").json()
     indicators = [c for c in configs if c["rule_type"] != "price_target"]
-    # 既定: 状態ベース6指標 + 乖離率/OBV/CCI + 追補版3フィルター（volume/weekly/atr）= 12
-    assert len(indicators) == 12
+    # 既定: 状態ベース6指標 + 乖離率/OBV/CCI + 追補版3フィルター（volume/weekly/atr）+ 地合い（market_regime）= 13
+    assert len(indicators) == 13
 
     # 重み更新
     target = indicators[0]
