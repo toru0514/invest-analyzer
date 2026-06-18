@@ -65,6 +65,7 @@ def build_prompt(plan: dict, market_ctx: dict) -> str:
         f"週足トレンド: {plan.get('weekly_trend')}",
         f"提案指値: {plan.get('limit_price')} / 利確: {plan.get('target_price')} / 損切: {plan.get('stop_price')}",
         f"地合い(指数トレンド): {market_ctx.get('index_trend')}",
+        f"地合いレジーム: {market_ctx.get('regime')}",
         f"決算まで日数: {market_ctx.get('days_to_earnings')}",
         "",
         "次のJSON形式のみで出力してください（前後に文章を付けない）:",

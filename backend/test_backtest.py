@@ -109,7 +109,9 @@ def test_regime_at_is_asof():
     assert _regime_at(None, pd.Timestamp("2026-01-07")) is None
 
 
-def test_run_backtest_regime_series_suppresses_risk_off_buys():
+def test_run_backtest_passes_asof_regime_to_evaluate(monkeypatch):
+    """run_backtest が各意思決定日のレジーム（asof）を evaluate に届けていることを検証（配線）。"""
+    import backtest as bt_mod
     from signals import regime_series
     stock = _trend_up_df(n=120, seed=5)
     idx_close = np.linspace(1300, 1000, 120)            # 同期間の下降指数 → ほぼ risk_off
@@ -117,7 +119,17 @@ def test_run_backtest_regime_series_suppresses_risk_off_buys():
                              "close": idx_close, "volume": np.full(120, 1e6)},
                             index=stock.index)
     rs = regime_series(index_df)
-    without = run_backtest({"X.T": stock}, configs=DEFAULT_CONFIGS, exit_mode="plan", backtest_days=60)
-    withr = run_backtest({"X.T": stock}, configs=DEFAULT_CONFIGS, exit_mode="plan", backtest_days=60,
-                         regime_series=rs)
-    assert withr["trade_count"] <= without["trade_count"]   # ゲートはBUY抑制のみ＝増えない
+
+    seen = []
+    real = bt_mod.evaluate
+
+    def spy(df, configs, bth, sth, regime=None):
+        seen.append(regime)
+        return real(df, configs, bth, sth, regime=regime)
+
+    monkeypatch.setattr(bt_mod, "evaluate", spy)
+    bt_mod.run_backtest({"X.T": stock}, configs=DEFAULT_CONFIGS, exit_mode="plan",
+                        backtest_days=60, regime_series=rs)
+    # レジームが evaluate に届き、下降指数なので risk_off が含まれる（asof・causal）
+    assert any(r == "risk_off" for r in seen)
+    assert all(r in ("risk_on", "neutral", "risk_off") for r in seen if r is not None)

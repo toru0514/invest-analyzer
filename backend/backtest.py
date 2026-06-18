@@ -164,6 +164,8 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
             in_window = eval_start_date is None or df.index[i] >= eval_start_date
 
             # 1) 提示指値の約定（有効期限内に安値が指値に達したら約定・コスト適用）
+            #    注: 地合いレジームゲートは発注（意思決定）時に効くため、発注済みの pending は
+            #        翌日以降に地合いが悪化しても約定し得る（既存の発注モデルに準拠・v1 の割り切り）。
             if in_window and shares == 0 and pending is not None and cash > 0:
                 if low <= pending["limit"]:
                     # 手数料: エントリーは投入現金(cash)、エグジットは総受取(proceeds)に対して控除
