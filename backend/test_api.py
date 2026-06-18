@@ -242,3 +242,16 @@ def test_optimize_holdout_in_sample_out_of_sample(client):
     assert "overfit_gap" in res
     assert "significance" in res and "benchmark" in res
     assert res["chosen_params"]["threshold"] in (2, 3, 4)
+
+
+def test_backtest_signals_include_regime(client):
+    r = client.post("/backtest", json={"demo": True, "days": 60, "exit_mode": "plan"})
+    assert r.status_code == 200
+    res = r.json()
+    assert res["signals"] and "regime" in res["signals"][0]["detail"]
+
+
+def test_optimize_still_ok_with_regime(client):
+    r = client.post("/optimize", json={"demo": True, "split_ratio": 0.7})
+    assert r.status_code == 200
+    assert r.json()["out_of_sample"]["sample"] == "out_of_sample"

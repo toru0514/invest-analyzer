@@ -23,7 +23,15 @@ from costs import cost_from_configs
 from evaluation import benchmark, evaluate_holdout, summary_stats
 from market import fetch_earnings_days, fetch_name, get_history
 from scheduler import DailyScheduler
-from signals import build_plan, evaluate, resolve_configs, weekly_trend
+from signals import (
+    _find_cfg,
+    build_plan,
+    evaluate,
+    market_regime,
+    regime_series,
+    resolve_configs,
+    weekly_trend,
+)
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -32,6 +40,24 @@ def _normalize_ticker(ticker: str) -> str:
     if t.isdigit():        # 数字だけなら東証とみなして .T を付与
         return f"{t}.T"
     return t
+
+
+def _regime_params(common: list[dict]) -> dict:
+    """共通設定の market_regime ルールからレジーム計算パラメータを抜き出す。"""
+    rp = _find_cfg(common, "market_regime")   # _find_cfg は params dict を返す
+    return {k: rp[k] for k in ("sma", "dd_lookback", "dd_threshold") if rp and k in rp}
+
+
+def _fetch_regime_series(period: str, demo: bool, common: list[dict]):
+    """指数を取得し日次レジーム系列を返す（取得失敗・空は None）。"""
+    try:
+        idx = get_history(os.environ.get("GEMINI_INDEX_TICKER", "^N225"),
+                          period=period, demo=demo)
+        if idx.empty:
+            return None
+        return regime_series(idx, **_regime_params(common))
+    except Exception:
+        return None
 
 _scheduler: DailyScheduler | None = None
 
@@ -308,13 +334,15 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
     # ticker 別 + 全銘柄共通(NULL) の設定を組み合わせる
     common = [c for c in all_configs if c["ticker"] is None]
 
-    # 地合い（指数トレンド）を1回だけ取得し全銘柄で使い回す（best-effort）
+    # 地合い（指数トレンド・レジーム）を1回だけ取得し全銘柄で使い回す（best-effort）
     index_trend = None
+    regime = None
     try:
         index_ticker = os.environ.get("GEMINI_INDEX_TICKER", "^N225")
         idx_df = get_history(index_ticker, period=period, demo=demo)
         if not idx_df.empty:
             index_trend = weekly_trend(idx_df)
+            regime = market_regime(idx_df, **_regime_params(common))
     except Exception:
         index_trend = None
 
@@ -329,7 +357,7 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
         db.upsert_prices(ticker, df)
 
         ticker_cfgs = resolve_configs(common, [c for c in all_configs if c["ticker"] == ticker])
-        score, direction, detail = evaluate(df, ticker_cfgs, buy_th, sell_th)
+        score, direction, detail = evaluate(df, ticker_cfgs, buy_th, sell_th, regime=regime)
         last_close = float(df["close"].iloc[-1])
         date = str(df.index[-1].date())
 
@@ -353,7 +381,8 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
              "weekly_trend": detail.get("weekly_trend"), "close": last_close,
              "limit_price": plan["limit_price"], "stop_price": plan["stop_price"],
              "target_price": plan["target_price"]},
-            {"index_trend": index_trend, "days_to_earnings": days_to_earnings},
+            {"index_trend": index_trend, "days_to_earnings": days_to_earnings,
+             "regime": regime},
         )
 
         db.upsert_plan({
@@ -452,17 +481,18 @@ def backtest(payload: BacktestIn):
     configs = db.list_configs(active_only=True)
     common = [c for c in configs if c["ticker"] is None]
     cost = cost_from_configs(common)
+    rs = _fetch_regime_series(payload.period, payload.demo, common)
     # days 未指定なら取得期間全体（warmup以降）を評価する
     bdays = payload.days if payload.days is not None else max(
         (len(df) for df in histories.values()), default=0) + 1
     result = run_backtest(histories, configs=common, initial_capital=payload.initial_capital,
                           backtest_days=bdays, buy_threshold=buy_th, sell_threshold=sell_th,
-                          exit_mode=payload.exit_mode, cost=cost)
+                          exit_mode=payload.exit_mode, cost=cost, regime_series=rs)
     result["failed"] = failed
     result["significance"] = summary_stats(result["closed_pnls"])
     result["benchmark"] = benchmark(histories, common, buy_threshold=buy_th, sell_threshold=sell_th,
                                     initial_capital=payload.initial_capital, warmup_days=35,
-                                    backtest_days=bdays, cost=cost)
+                                    backtest_days=bdays, cost=cost, regime_series=rs)
 
     if payload.persist:
         for t in result["trades"]:
@@ -495,8 +525,9 @@ def optimize(payload: OptimizeIn):
 
     common = [c for c in db.list_configs(active_only=True) if c["ticker"] is None]
     cost = cost_from_configs(common)
+    rs = _fetch_regime_series(payload.period, payload.demo, common)
     res = evaluate_holdout(histories, common, split_ratio=payload.split_ratio, cost=cost,
-                           initial_capital=payload.initial_capital)
+                           initial_capital=payload.initial_capital, regime_series=rs)
     res["failed"] = failed
     res["tickers"] = list(histories.keys())
     return res
