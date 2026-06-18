@@ -116,10 +116,11 @@ def regime_series(index_df, **params) -> pd.Series:
 - `benchmark(..., regime_series=None)` と `evaluate_holdout(..., regime_series=None)` は `run_backtest` へ透過。
   - ホールドアウトでは train でも test でも**同一の `regime_series`**（全期間の前計算）を使い、各日 `asof` で当日以前のレジームを参照する（look-ahead 安全。train は split 以前の日しか評価しないので自然に train 範囲のレジームのみ使う）。
 - `_regime_at(series, d)`: `series is None` → None。`v = series.asof(d)`、`pd.isna(v)` → None、else `v`。
+- **意思決定日の evaluate は2箇所**（score モード・plan モード）。それに加え、各銘柄ループ末尾の**表示用 signal_rows の evaluate も最新レジーム**（`_regime_at(regime_series, df.index[-1])`）を渡し、最終シグナルの `detail["regime"]` を一貫して埋める。
 
 ### 5.7 エンドポイント配線
 - `/backtest`・`/optimize`：対象銘柄取得と同様に指数 `get_history(INDEX_TICKER, period, demo)` を取得し、空でなければ `rs = regime_series(idx_df, **regime_params)` を1回算出して評価層に渡す。指数取得失敗時は `regime_series=None`（ゲート無効・従来挙動）。
-- `regime_params` は `market_regime` 設定（common configs）から読む。無ければ既定。
+- `regime_params` は `market_regime` 設定（common configs、`_find_cfg(common, "market_regime")` の params）から読む。無ければ既定。**同じ解決済み params** を `regime_series(...)` の前計算と（ライブの）`perform_refresh` の `market_regime(...)` の両方に渡し、バックテストとライブのレジーム定義を一致させる。
 
 ## 6. データフロー（/optimize 例）
 ```
@@ -146,7 +147,7 @@ def regime_series(index_df, **params) -> pd.Series:
 - 既存 70 件は維持（指数未指定の経路は不変）。
 
 ## 9. エラー処理・境界
-- 指数 `len < 5` や None → `market_regime` は "neutral"、`regime_series` は空/None 相当でゲート無効。
+- 指数 `len < 5` → `market_regime` は "neutral"（`regime_series` も各日 "neutral" を返す＝`asof` は "neutral"・ゲート実質無効）。指数 None/未取得 → `regime_series=None` でゲート無効。
 - `regime_series.asof(d)` が NaN（d が系列開始前）→ None。
 - 設定 `market_regime` 未登録 → ゲート無効（`_find_cfg` が None）。
 
