@@ -383,7 +383,8 @@ def evaluate(
     """df: OHLCV（小文字列・古い順）。最終行についてスコア判定する。
 
     buy_threshold / sell_threshold は UI から調整可能（DB 保存値を渡す）。
-    戻り値: (score, direction, detail)
+    戻り値: (score, direction, detail)。detail には各指標の個別寄与に加え、
+    detail["_groups"]（順張り/逆張り/需給/パターンのグループ別純額・打ち手4）が入る。
     """
     if configs is None:
         configs = DEFAULT_CONFIGS

@@ -241,7 +241,7 @@ def test_optimize_holdout_in_sample_out_of_sample(client):
     assert res["out_of_sample"]["sample"] == "out_of_sample"
     assert "overfit_gap" in res
     assert "significance" in res and "benchmark" in res
-    assert res["chosen_params"]["threshold"] in (2, 3, 4)
+    assert res["chosen_params"]["threshold"] in (1, 2, 3)
 
 
 def test_backtest_signals_include_regime(client):

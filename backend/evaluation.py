@@ -5,8 +5,10 @@ import statistics
 
 from costs import DEFAULT_COST
 
-# in-sample で探索する既定グリッド（閾値のみ・exit_mode は plan 固定）
-DEFAULT_GRID: dict[str, list[int]] = {"threshold": [2, 3, 4]}
+# in-sample で探索する既定グリッド（閾値のみ・exit_mode は plan 固定）。
+# 打ち手4のグループ化でスコアは最大±4に圧縮され、順張り群と逆張り群は構造的に逆を向くため
+# 3〜4（3グループ以上一致）はほぼ到達不能。探索は 1〜3（1〜3グループ一致）に合わせる。
+DEFAULT_GRID: dict[str, list[int]] = {"threshold": [1, 2, 3]}
 
 MIN_TRADES = 30   # これ未満は統計的に不十分（誤差範囲）
 

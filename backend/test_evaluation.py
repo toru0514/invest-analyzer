@@ -83,7 +83,7 @@ def test_evaluate_holdout_structure_and_no_lookahead():
         assert key in res
     assert res["in_sample"]["sample"] == "in_sample"
     assert res["out_of_sample"]["sample"] == "out_of_sample"
-    assert res["chosen_params"]["threshold"] in (2, 3, 4)
+    assert res["chosen_params"]["threshold"] in (1, 2, 3)
     assert isinstance(res["in_sample"]["sweep"], list) and len(res["in_sample"]["sweep"]) == 3
     # 寄与度（leave-one-out）は in_sample 配下に残す（フロント /optimize が表示）
     assert isinstance(res["in_sample"]["contributions"], list)
