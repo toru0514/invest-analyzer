@@ -423,6 +423,48 @@ def test_score_indicators_strengths_are_additive_only():
     assert isinstance(score, int)
 
 
+def test_strength_net_normalized_and_signed():
+    # 急落（_declining_df）は逆張りが買い側でも、トレンド/需給が下向きで支配 → 純額は売り側（落ちるナイフ）。
+    # （contrarian グループ単独では買いだが、trend(−)+volume(−) が上回るのが正しい挙動）
+    df_dn = signals.add_indicators(_declining_df())
+    _, d_dn = signals._score_indicators(df_dn, _base_configs())
+    assert -1.0 <= d_dn["_strength_net"] <= 1.0
+    assert d_dn["_strength_net"] < 0                          # 純額は売り側に符号
+
+    # 上昇トレンド（_idx）は trend が買い側 → 純額は買い側（正）。
+    df_up = signals.add_indicators(_idx(np.linspace(1000, 1300, 120)))
+    _, d_up = signals._score_indicators(df_up, _base_configs())
+    assert 0 < d_up["_strength_net"] <= 1.0
+
+
+def test_evaluate_confidence_range_and_alignment():
+    # 上昇トレンド → buy（trend が買い側）。閾値1で約定（閾値2だと score=1 で neutral になるため）。
+    df = _idx(np.linspace(1000, 1300, 120))
+    score, direction, detail = evaluate(df, _base_configs(), 1, -1)
+    assert direction == "buy"
+    assert 0 < detail["confidence"] <= 100
+    assert isinstance(score, int)                 # 後方互換: score は int のまま
+    # 不変条件: _strength_net の符号は最終 direction と整合（buy → 正）
+    assert detail["_strength_net"] > 0
+
+
+def test_evaluate_confidence_zero_when_neutral():
+    # 閾値を高くして neutral にすると confidence=0
+    df = _declining_df()
+    _, direction, detail = evaluate(df, _base_configs(), 99, -99)
+    assert direction == "neutral"
+    assert detail["confidence"] == 0
+
+
+def test_evaluate_confidence_discounted_by_regime_gate():
+    cfg = [c for c in DEFAULT_CONFIGS if c["rule_type"] in ("rsi", "market_regime")]
+    base = evaluate(_declining_df(), cfg, 1, -1)                 # regime=None
+    off = evaluate(_declining_df(), cfg, 1, -1, regime="risk_off")
+    assert off[2].get("regime_filter") == -2                    # ゲート penalty 発火
+    # ゲートで割り引かれる（同条件で confidence が下がる、または neutral 化で 0）
+    assert off[2]["confidence"] <= base[2]["confidence"]
+
+
 if __name__ == "__main__":
     test_evaluate_returns_valid_direction()
     test_golden_dead_cross_are_exclusive()

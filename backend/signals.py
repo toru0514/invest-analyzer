@@ -251,6 +251,9 @@ MA_CROSS_STRENGTH_ATR_K = 2.0  # 短長MA乖離を ATR 比で正規化
 OBV_STRENGTH_K = 1.0           # OBV-OBVSMA を |OBVSMA| 比で正規化
 CCI_STRENGTH_SPAN = 100.0      # CCI 閾値超過分の正規化幅
 DISPARITY_STRENGTH_SPAN = 7.0  # 乖離率 閾値超過分の正規化幅（%）
+VOL_BOOST = 1.15       # 出来高サージ時の確信度ブースト
+VOL_DISCOUNT = 0.7     # 出来高細り時（direction 生存時）の確信度ディスカウント
+GATE_DISCOUNT = 0.6    # レジーム/週足ゲート penalty 時の確信度ディスカウント
 
 # レジーム別グループ重み（打ち手5）。グループ純額(±GROUP_CAP)に乗じてから合算する。
 # トレンド時は順張り(trend)、レンジ時は逆張り(contrarian)を主役にする。
@@ -449,6 +452,22 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]],
     detail["_groups"] = groups            # クリップ後・重み適用前の純額（解釈性）
     detail["_regime"] = regime            # どのレジームで重み付けたか
     detail["_strengths"] = strengths
+
+    # 連続強度をグループ集約 → ±GROUP_CAP クリップ → レジーム加重 → 最大重みで正規化（∈[-1,1]）
+    _CANDLE_KEYS = ("3whitesoldiers", "3blackcrows", "engulfing")
+    sgroup_raw: dict[str, float] = {}
+    for key, s in strengths.items():
+        # candle サブキーは INDICATOR_GROUP に無いので pattern へ寄せる（vote と同じグループ扱い）
+        g = INDICATOR_GROUP.get(key, "pattern" if key in _CANDLE_KEYS else key)
+        sgroup_raw[g] = sgroup_raw.get(g, 0.0) + s
+    sgroups = {g: max(-GROUP_CAP, min(GROUP_CAP, raw)) for g, raw in sgroup_raw.items()}
+    # 固定4グループ分母で正規化する（欠けたグループは 0 寄与）＝有効指標が少ないほど確信度は
+    # 低めに出る。これは「証拠が薄いほど自信を持たない」という意図的な保守側の設計（spec §4.2）。
+    _CONF_GROUPS = ("trend", "contrarian", "volume", "pattern")
+    wmax = sum(_group_weight(regime, g) * GROUP_CAP for g in _CONF_GROUPS)
+    anum = sum(_group_weight(regime, g) * sgroups.get(g, 0.0) for g in _CONF_GROUPS)
+    detail["_strength_net"] = (anum / wmax) if wmax else 0.0
+
     score = sum(_group_weight(regime, g) * v for g, v in groups.items())
     return score, detail
 
@@ -526,6 +545,25 @@ def evaluate(
                 score -= penalty
                 detail["regime_filter"] = -penalty
                 direction = _direction(score)
+
+    # --- 連続確信度（打ち手6）: direction とゲート確定後に算出（detail を後検査して二重計算回避） ---
+    a = float(detail.get("_strength_net", 0.0))
+    if direction == "buy":
+        conf = max(0.0, a) * 100.0
+    elif direction == "sell":
+        conf = max(0.0, -a) * 100.0
+    else:
+        conf = 0.0
+    vol = detail.get("volume")
+    if vol == "quiet":
+        conf *= VOL_DISCOUNT
+    elif isinstance(vol, (int, float)) and not isinstance(vol, bool) and vol != 0:
+        conf = min(100.0, conf * VOL_BOOST)
+    if isinstance(detail.get("regime_filter"), int):   # penalty 発火（block は direction=neutral 済み）
+        conf *= GATE_DISCOUNT
+    if isinstance(detail.get("weekly_filter"), int):
+        conf *= GATE_DISCOUNT
+    detail["confidence"] = round(max(0.0, min(100.0, conf)), 1)
 
     return score, direction, detail
 
