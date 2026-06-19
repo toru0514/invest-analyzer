@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, Holding, PlanRow, WatchItem } from "@/lib/api";
+import { selectTopN } from "@/lib/rows";
 import DirectionBadge from "@/components/DirectionBadge";
 import Disclaimer from "@/components/Disclaimer";
 import StockAddSearch from "@/components/StockAddSearch";
@@ -27,6 +28,7 @@ export default function PlanBoard() {
   const [watch, setWatch] = useState<WatchItem[]>([]);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [prices, setPrices] = useState<Record<string, { date: string; close: number }>>({});
+  const [topN, setTopN] = useState(3);
   const [demo, setDemo] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,14 +37,15 @@ export default function PlanBoard() {
   async function load() {
     setError(null);
     try {
-      const [plan, hs, ps, w] = await Promise.all([
-        api.getPlan(), api.getHoldings(), api.getLatestPrices(), api.getWatchlist(),
+      const [plan, hs, ps, w, settings] = await Promise.all([
+        api.getPlan(), api.getHoldings(), api.getLatestPrices(), api.getWatchlist(), api.getSettings(),
       ]);
       setPlanDate(plan.plan_date);
       setRows(plan.rows);
       setHoldings(hs);
       setPrices(ps);
       setWatch(w);
+      setTopN(settings.top_n);
     } catch (e) {
       setError(String(e));
     }
@@ -82,6 +85,7 @@ export default function PlanBoard() {
     return 3;
   }
   const ordered = [...watch].sort((a, b) => prio(a.ticker) - prio(b.ticker));
+  const topPicks = selectTopN(rows, topN);
 
   const totalPnl = holdings.reduce((acc, h) => {
     const p = prices[h.ticker]?.close;
@@ -133,6 +137,31 @@ export default function PlanBoard() {
         提案指値は「人間が証券アプリで注文を置くための数字」です。発注・自動売買は行いません。
       </p>
 
+      {topN > 0 && topPicks.length > 0 && (
+        <div className="mb-6">
+          <h2 className="mb-1 text-base font-bold text-blue-800">
+            今夜の推奨 Top {topPicks.length}
+          </h2>
+          <p className="mb-2 text-xs text-slate-500">確信度の高い順。下の全リストにも再掲されます。</p>
+          <div className="space-y-3">
+            {topPicks.map((pick) => {
+              const wi = watch.find((x) => x.ticker === pick.ticker);
+              return (
+                <PlanCard
+                  key={`top-${pick.ticker}`}
+                  ticker={pick.ticker}
+                  name={wi?.name}
+                  row={pick}
+                  holding={heldMap.get(pick.ticker) ?? null}
+                  price={prices[pick.ticker]?.close ?? null}
+                  onChanged={load}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {ordered.length === 0 ? (
         <div className="rounded border bg-white p-6 text-center text-sm text-slate-500">
           監視銘柄がありません。上の「銘柄を追加」から登録してください。
@@ -177,6 +206,11 @@ function PlanCard({
         {name && <span className="font-semibold text-slate-700">{name}</span>}
         {row ? <DirectionBadge direction={row.direction} /> : <span className="text-xs text-slate-400">作戦未生成</span>}
         {row && <span className="text-sm text-slate-500">スコア {row.score}</span>}
+        {row?.confidence != null && (
+          <span className="rounded bg-blue-600 px-1.5 py-0.5 text-xs font-semibold text-white">
+            確信度 {Math.round(row.confidence)}
+          </span>
+        )}
         {row?.vol_ratio != null && <span className="text-sm text-slate-500">出来高 {row.vol_ratio.toFixed(2)}倍</span>}
         {row?.weekly_trend && (
           <span className={`text-sm ${TREND_CLASS[row.weekly_trend] ?? ""}`}>
@@ -324,7 +358,7 @@ function AiCommentary({
         <span className="text-xs font-semibold text-indigo-700">AI解説</span>
         {confidence != null && (
           <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-xs font-semibold text-white">
-            確信度 {confidence}
+            AI確信度 {confidence}
           </span>
         )}
       </div>

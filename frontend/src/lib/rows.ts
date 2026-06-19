@@ -41,6 +41,27 @@ export function mergeRows(
   });
 }
 
+// 作戦ボード Top N（打ち手6）。confidence 降順 → |score| 降順 → ticker 昇順の決定論順。
+// confidence=null は移行前の旧 plan 行のみで生じうる（新規生成行は常に数値）。?? -1 で最下位に置く。
+type Rankable = { ticker: string; direction: Direction; score: number; confidence: number | null };
+
+export function rankByConfidence<T extends Rankable>(rows: T[]): T[] {
+  return [...rows]
+    .filter((r) => r.direction !== "neutral")
+    .sort(
+      (a, b) =>
+        (b.confidence ?? -1) - (a.confidence ?? -1) ||
+        Math.abs(b.score) - Math.abs(a.score) ||
+        a.ticker.localeCompare(b.ticker),
+    );
+}
+
+// 「今夜の推奨」は正の量的確信度を持つ actionable のみを採る。confidence が 0/null
+// （＝整数scoreはbuy/sellでも連続確信度が確信なし）の行は推奨に載せない。
+export function selectTopN<T extends Rankable>(rows: T[], n: number): T[] {
+  return n <= 0 ? [] : rankByConfidence(rows).filter((r) => (r.confidence ?? 0) > 0).slice(0, n);
+}
+
 export function applyRefresh(rows: Row[], updated: RefreshRow[]): Row[] {
   const byTicker = new Map(updated.map((u) => [u.ticker, u]));
   return rows.map((r) => {

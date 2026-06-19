@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeRows, applyRefresh, Row } from "@/lib/rows";
+import { mergeRows, applyRefresh, selectTopN, Row } from "@/lib/rows";
 import { RefreshRow, Signal, WatchItem } from "@/lib/api";
 
 const watch: WatchItem[] = [
@@ -33,6 +33,46 @@ describe("mergeRows", () => {
     const rows = mergeRows(watch, signals);
     expect(rows[0].score).toBe(3);
     expect(rows[0].direction).toBe("buy");
+  });
+});
+
+const mk = (ticker: string, direction: any, score: number, confidence: number | null) =>
+  ({ ticker, direction, score, confidence } as any);
+
+describe("selectTopN", () => {
+  it("confidence 降順で上位 N を返し neutral を除外する", () => {
+    const rows = [
+      mk("A.T", "buy", 2, 40),
+      mk("B.T", "buy", 3, 80),
+      mk("C.T", "neutral", 0, 99),  // neutral は対象外
+      mk("D.T", "sell", -2, 60),
+    ];
+    const top = selectTopN(rows, 2);
+    expect(top.map((r) => r.ticker)).toEqual(["B.T", "D.T"]);
+  });
+
+  it("同点は |score| 降順 → ticker 昇順で決定論的", () => {
+    const rows = [
+      mk("Z.T", "buy", 1, 70),
+      mk("Y.T", "buy", 3, 70),
+      mk("X.T", "buy", 3, 70),
+    ];
+    expect(selectTopN(rows, 3).map((r) => r.ticker)).toEqual(["X.T", "Y.T", "Z.T"]);
+  });
+
+  it("n<=0 は空、n>件数 は全件", () => {
+    const rows = [mk("A.T", "buy", 2, 40), mk("B.T", "buy", 3, 80)];
+    expect(selectTopN(rows, 0)).toEqual([]);
+    expect(selectTopN(rows, 99).map((r) => r.ticker)).toEqual(["B.T", "A.T"]);
+  });
+
+  it("confidence が 0/null の actionable 行は推奨から除外する", () => {
+    const rows = [
+      mk("A.T", "buy", 2, null), // null（確信度なし）→ 除外
+      mk("B.T", "buy", 1, 10), //  正 → 採用
+      mk("E.T", "buy", 4, 0), //   0（方向はbuyだが連続確信度0＝落ちるナイフ）→ 除外
+    ];
+    expect(selectTopN(rows, 5).map((r) => r.ticker)).toEqual(["B.T"]);
   });
 });
 

@@ -49,6 +49,7 @@ export type AppSettings = {
   scheduler_time: string;
   scheduler_demo: boolean;
   scheduler_skip_holidays: boolean;
+  top_n: number;
 };
 
 export type Candle = {
@@ -72,6 +73,7 @@ export type PlanRow = {
   stop_price: number | null;
   target_price: number | null;
   rationale: string | null;
+  confidence: number | null;
   ai_summary: string | null;
   ai_confidence: number | null;
   ai_risks: string | null; // JSON文字列化された string[]
