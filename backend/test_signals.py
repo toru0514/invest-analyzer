@@ -377,6 +377,52 @@ def test_evaluate_neutral_amplifies_contrarian():
     assert neu[2]["_regime"] == "neutral"
 
 
+# --- 打ち手6: 連続強度ヘルパ ---
+def test_ramp_strength_monotonic_and_bounded():
+    # RSI 型（floor=0, ceil=100, 中立帯[30,70]）。低いほど買い側に強い。
+    s15 = signals._ramp_strength(15, 30, 70)
+    s29 = signals._ramp_strength(29, 30, 70)
+    assert 0 < s29 < s15 <= 1.0            # 売られすぎが深いほど強い・単調
+    assert signals._ramp_strength(50, 30, 70) == 0.0   # 中立帯は 0
+    assert -1.0 <= signals._ramp_strength(85, 30, 70) < 0   # 買われすぎは負
+    assert signals._ramp_strength(0, 30, 70) == 1.0    # 下限で +1
+    assert signals._ramp_strength(100, 30, 70) == -1.0  # 上限で -1
+
+
+def test_beyond_strength_monotonic_and_clipped():
+    # CCI/乖離率 型（無界・閾値超過分を span 正規化）
+    assert signals._beyond_strength(-150, -100, 100, 100) == 0.5
+    assert signals._beyond_strength(-300, -100, 100, 100) == 1.0   # span 超は 1 にクリップ
+    assert signals._beyond_strength(0, -100, 100, 100) == 0.0
+    assert signals._beyond_strength(150, -100, 100, 100) == -0.5
+
+
+def test_tanh_strength_sign_and_bounded():
+    assert signals._tanh_strength(5.0, 2.0) > 0
+    assert signals._tanh_strength(-5.0, 2.0) < 0
+    assert abs(signals._tanh_strength(1e9, 2.0)) <= 1.0
+    assert signals._tanh_strength(0.0, 2.0) == 0.0
+    assert signals._tanh_strength(1.0, 0.0) == 0.0    # scale=0 はゼロ（ゼロ除算回避）
+
+
+def test_score_indicators_emits_signed_strengths():
+    # 売られすぎ（_declining_df）→ 逆張り指標の強度は買い側（正）。トレンドは下降（負）。
+    df_ind = signals.add_indicators(_declining_df())
+    score, detail = signals._score_indicators(df_ind, _base_configs())
+    st = detail["_strengths"]
+    assert isinstance(st, dict) and st                      # 何か発火している
+    assert st.get("rsi", 0) > 0                             # 売られすぎ → rsi 買い側
+    assert all(-1.0 <= v <= 1.0 for v in st.values())       # 全て有界
+
+
+def test_score_indicators_strengths_are_additive_only():
+    # 後方互換: _strengths を足しても従来の score / _groups は不変。
+    df_ind = signals.add_indicators(_declining_df())
+    score, detail = signals._score_indicators(df_ind, _base_configs())
+    assert score == sum(detail["_groups"].values())        # 既存の不変条件（打ち手4）
+    assert isinstance(score, int)
+
+
 if __name__ == "__main__":
     test_evaluate_returns_valid_direction()
     test_golden_dead_cross_are_exclusive()
