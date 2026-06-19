@@ -239,15 +239,17 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ```python
 def test_strength_net_normalized_and_signed():
-    df_ind = signals.add_indicators(_declining_df())          # 売られすぎ → 買い側
-    _, detail = signals._score_indicators(df_ind, _base_configs())
-    a = detail["_strength_net"]
-    assert -1.0 <= a <= 1.0
-    assert a > 0                                              # 買い側に符号
+    # 急落（_declining_df）は逆張りが買い側でも、トレンド/需給が下向きで支配 → 純額は売り側（落ちるナイフ）。
+    # （contrarian グループ単独では買いだが、trend(−)+volume(−) が上回るのが正しい挙動）
+    df_dn = signals.add_indicators(_declining_df())
+    _, d_dn = signals._score_indicators(df_dn, _base_configs())
+    assert -1.0 <= d_dn["_strength_net"] <= 1.0
+    assert d_dn["_strength_net"] < 0                          # 純額は売り側に符号
 
-    df_up = signals.add_indicators(_idx(np.linspace(1000, 1300, 120)))  # 上昇 → trend 買い
+    # 上昇トレンド（_idx）は trend が買い側 → 純額は買い側（正）。
+    df_up = signals.add_indicators(_idx(np.linspace(1000, 1300, 120)))
     _, d_up = signals._score_indicators(df_up, _base_configs())
-    assert d_up["_strength_net"] > 0
+    assert 0 < d_up["_strength_net"] <= 1.0
 ```
 
 - [ ] **Step 2: 失敗を確認**
@@ -261,9 +263,11 @@ Expected: FAIL（`KeyError: '_strength_net'`）
 
 ```python
     # 連続強度をグループ集約 → ±GROUP_CAP クリップ → レジーム加重 → 最大重みで正規化（∈[-1,1]）
+    _CANDLE_KEYS = ("3whitesoldiers", "3blackcrows", "engulfing")
     sgroup_raw: dict[str, float] = {}
     for key, s in strengths.items():
-        g = INDICATOR_GROUP.get(key, key)
+        # candle サブキーは INDICATOR_GROUP に無いので pattern へ寄せる（vote と同じグループ扱い）
+        g = INDICATOR_GROUP.get(key, "pattern" if key in _CANDLE_KEYS else key)
         sgroup_raw[g] = sgroup_raw.get(g, 0.0) + s
     sgroups = {g: max(-GROUP_CAP, min(GROUP_CAP, raw)) for g, raw in sgroup_raw.items()}
     _CONF_GROUPS = ("trend", "contrarian", "volume", "pattern")
@@ -272,17 +276,7 @@ Expected: FAIL（`KeyError: '_strength_net'`）
     detail["_strength_net"] = (anum / wmax) if wmax else 0.0
 ```
 
-注: candle のサブキー（3whitesoldiers 等）は `INDICATOR_GROUP` に無いため `g=key` になり 4 グループ集約から漏れる。これを避けるため、強度格納時のグループ解決を vote と揃える。`INDICATOR_GROUP` は `candle_pattern→pattern` のみ持つので、`_str` のキーを **rule_type 基準のグループに寄せる**: candle は各サブキーを足さず、`pattern` グループ強度として 1 本化する。具体的には Task 1 Step 7 の candle 追加を「`strengths` には個別キー、ただし集約では pattern に寄せる」ため、ここで明示的に pattern を補正する:
-
-```python
-    # candle 系サブキーは pattern グループへ寄せる（vote と同じ扱い）
-    for _ck in ("3whitesoldiers", "3blackcrows", "engulfing"):
-        if _ck in strengths:
-            sgroups["pattern"] = max(-GROUP_CAP, min(GROUP_CAP,
-                                     sgroups.get("pattern", 0.0) + 0.0))  # 既に加算済みなら何もしない
-```
-
-（実装メモ: シンプルさのため、`g = INDICATOR_GROUP.get(key, "pattern" if key in ("3whitesoldiers","3blackcrows","engulfing") else key)` と集約ループ側で解決すれば上の補正は不要。集約ループの `g = ...` 行をこの式に置き換えること。）
+ポイント: candle のサブキー（`3whitesoldiers` 等）は `INDICATOR_GROUP` に無いため、上の `g = INDICATOR_GROUP.get(key, "pattern" if key in _CANDLE_KEYS else key)` で **pattern グループへ寄せる**（vote と同じ扱い）。これを忘れると candle 強度が独自キーに漏れて pattern が 0 のままになり、確信度にパターンが寄与しない。`_strength_net` は 4 グループ（trend/contrarian/volume/pattern）固定分母で正規化されるので、漏れは静かなバグになる。
 
 - [ ] **Step 4: 成功を確認**
 
@@ -293,12 +287,14 @@ Expected: PASS
 
 ```python
 def test_evaluate_confidence_range_and_alignment():
-    # 売られすぎ → buy 側、confidence は (0,100]
-    df = _declining_df()
+    # 上昇トレンド → buy（trend が買い側）。閾値1で約定（閾値2だと score=1 で neutral になるため）。
+    df = _idx(np.linspace(1000, 1300, 120))
     score, direction, detail = evaluate(df, _base_configs(), 1, -1)
     assert direction == "buy"
     assert 0 < detail["confidence"] <= 100
     assert isinstance(score, int)                 # 後方互換: score は int のまま
+    # 不変条件: _strength_net の符号は最終 direction と整合（buy → 正）
+    assert detail["_strength_net"] > 0
 
 
 def test_evaluate_confidence_zero_when_neutral():
