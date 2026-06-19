@@ -94,6 +94,10 @@ direction == "neutral" → conf = 0           # Top N の対象外
 
 最終 `confidence = round(conf, 1)`、範囲 `[0, 100]` を保証。
 
+**二重計算の回避（実装上の明示）**: 既存 `evaluate` は volume フィルタ→`_direction`→週足 gate→レジーム gate の順で `score`/`direction` を**インラインで**書き換える。確信度はこの分岐ロジックに割り込ませず、**最終段で `detail` のキーを後から検査**して倍率を決める：`detail["volume"]`（surge は `±bonus`・quiet は `"quiet"`）、`detail["weekly_filter"]`、`detail["regime_filter"]`。これにより整数経路と確信度計算が独立し、二重計算を避ける。
+
+**quiet volume の相互作用**: 整数経路の quiet は `score = int(score/2)` で borderline な score を閾値未満へ押し下げ、`direction` を neutral 化しうる。その場合は上の neutral 規則で `confidence = 0` となり VOL_DISCOUNT は無関係。VOL_DISCOUNT が効くのは **direction が生き残った（buy/sell のまま）quiet 時のみ**。
+
 ### 4.4 永続化と API
 
 - `daily_plan` に `confidence REAL` を追加。既存 `_migrate_daily_plan` と同じ**冪等 ALTER**で旧 DB を移行（`ai_summary` 等と同じ手法）。
@@ -104,6 +108,7 @@ direction == "neutral" → conf = 0           # Top N の対象外
 ### 4.5 Top N ランキング（フロント）
 
 - `app_meta` に `top_n`（既定 `"3"`）を追加（`DEFAULT_META` と同じ key-value 機構、`get_meta`/`set_meta`）。`GET /settings`・`PUT /settings` に `top_n` を通す（既存 thresholds と同じ並び）。
+- **`top_n` の検証/境界**: `buy_threshold` と同様に `int(get_meta("top_n", "3"))` でパースし、`max(0, n)` にクランプ（負値・非整数文字列は既定3にフォールバック）。`top_n` が actionable 件数より大きい場合は存在する分だけ表示（切り出し件数 = `min(top_n, actionable件数)`）。`top_n=0` は「今夜の推奨」セクション非表示（全ウォッチ一覧のみ）。
 - 作戦ボード（`frontend/src/app/plan/page.tsx`）:
   - actionable（direction≠neutral かつ confidence 算出済み）な行を **confidence 降順**に並べ、上位 `top_n` を「**今夜の推奨 Top N**」セクションとして上部に切り出す。
   - 既存の全ウォッチ一覧は下にそのまま残す（課題3「ウォッチ一覧は残しつつ上部に作戦を切り出す」）。
