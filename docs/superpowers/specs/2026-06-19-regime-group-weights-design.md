@@ -36,7 +36,7 @@
 | 重み | レジーム×グループの整数重み表（スコアは int 維持） |
 | 既定値 | risk_on/risk_off は trend=2、neutral は contrarian=2、他は 1。`regime=None` は全1（＝打ち手4の挙動） |
 | 配線 | `evaluate` → `_score_indicators(df, configs, regime)`。バックテスト/エンドポイントは無改修 |
-| 後方互換 | `regime=None` で全重み1＝打ち手4と同一。既存テスト不変 |
+| 後方互換 | `regime=None` で全重み1＝打ち手4と同一。regime未指定の経路は不変（regime付きの既存テスト1件は更新が必要・§7参照） |
 
 ### 既定重み表
 ```
@@ -92,13 +92,13 @@ evaluate(df, configs, ..., regime)
 ## 7. 後方互換・既存テストへの影響
 - `regime=None` で全重み1＝打ち手4と完全一致。`regime` を渡さない既存テスト（`_score_indicators`/`evaluate` 直呼びでレジーム未指定）は**不変**。
 - `signal_config` 不変（重み表は定数）→ config 件数テスト不変。
-- レジーム付きでスコア値が変わるため、**レジームを渡してスコア値を断定する既存テストがあれば**更新（現状そういうテストは無い見込み。実行で確認）。
+- **打ち手3の既存テスト `test_evaluate_regime_records_and_no_change_when_not_risk_off`（`test_signals.py`）は更新が必要**。これは「`regime="risk_on"` でスコア・direction が変わらない」を主張するが、打ち手5 では risk_on が trend を増幅するため**変わる**（前提が陳腐化）。新挙動（risk_on でスコアが上がり得る／`detail["_regime"]` は記録される）へ書き換える。これが打ち手5 の中心的な挙動変化。
 - `/optimize` のグリッド `[1,2,3]`（打ち手4で調整済み）：重み付きで最大は risk_on/neutral で ±5 に拡大するが、閾値到達は重み付き合成で評価される。グリッドは現状維持（必要なら計画で再検討）。
 
 ## 8. テスト戦略（決定論・ネット非依存）
 - **risk_on で trend が増幅**：順張りが買い側・逆張りが中立な合成データで、`evaluate(regime="risk_on")` のスコアが `regime=None` より大きい（trend×2 が効く）こと。
 - **neutral で contrarian が増幅**：逆張りが買い側に振れる（売られすぎ）データで、`evaluate(regime="neutral")` のスコアが `regime=None` より大きいこと。
-- **後方互換**：`regime=None` のスコア・direction が打ち手4と同一（重み1）。
+- **後方互換**：`regime=None` のスコア・direction が打ち手4と同一（重み1）。なお打ち手3 の no-change テスト（risk_on で不変を主張）は§7のとおり**新挙動へ更新**する（「risk_on は不変」は打ち手5 と非整合）。
 - **detail**：`detail["_groups"]` は重み前のクリップ値・`detail["_regime"]` にレジームが入る。
 - **int 維持**：整数重み×int で score が int。
 - 既存 `backend/`（85件）を緑に保つ（レジームを渡さない経路は不変）。
