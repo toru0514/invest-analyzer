@@ -178,6 +178,11 @@ def test_plan_generate_and_get(client):
         if r["direction"] in ("buy", "sell"):
             assert r["limit_price"] is not None
             assert r["stop_price"] is not None and r["target_price"] is not None
+    # 打ち手6: 量的確信度カラムが存在し、buy/sell 行は 0..100 の値を持つ（ai_confidence とは別物）
+    for r in got["rows"]:
+        assert "confidence" in r
+        if r["direction"] in ("buy", "sell") and r["confidence"] is not None:
+            assert 0 <= r["confidence"] <= 100
 
 
 def test_holdings_crud(client):

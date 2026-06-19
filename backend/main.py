@@ -390,6 +390,7 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
             "vol_ratio": detail.get("vol_ratio"), "weekly_trend": detail.get("weekly_trend"),
             "limit_price": plan["limit_price"], "stop_price": plan["stop_price"],
             "target_price": plan["target_price"], "rationale": plan["rationale"],
+            "confidence": detail.get("confidence"),
             "ai_summary": commentary["summary"] if commentary else None,
             "ai_confidence": commentary["confidence"] if commentary else None,
             "ai_risks": json.dumps(commentary["risks"], ensure_ascii=False) if commentary else None,
