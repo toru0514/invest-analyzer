@@ -328,7 +328,8 @@ def test_score_indicators_risk_on_doubles_trend():
     none_score, none_detail = signals._score_indicators(df_ind, cfg)            # regime=None
     on_score, on_detail = signals._score_indicators(df_ind, cfg, "risk_on")
     assert none_detail["_groups"]["trend"] == 1                                  # 順張りが買い側
-    assert on_score == none_score + none_detail["_groups"]["trend"]             # trend のみ ×2
+    assert on_detail["_groups"] == none_detail["_groups"]                        # 重み前グループはレジーム非依存
+    assert on_score == none_score + none_detail["_groups"]["trend"]             # trend のみ ×2（他は不変）
     assert on_detail["_regime"] == "risk_on"
     assert isinstance(on_score, int)                                            # 整数重み×int → int
 
@@ -340,7 +341,8 @@ def test_score_indicators_neutral_doubles_contrarian():
     none_score, none_detail = signals._score_indicators(df_ind, cfg)
     neu_score, neu_detail = signals._score_indicators(df_ind, cfg, "neutral")
     assert none_detail["_groups"]["contrarian"] == 1
-    assert neu_score == none_score + none_detail["_groups"]["contrarian"]       # contrarian のみ ×2
+    assert neu_detail["_groups"] == none_detail["_groups"]                       # 重み前グループはレジーム非依存
+    assert neu_score == none_score + none_detail["_groups"]["contrarian"]       # contrarian のみ ×2（他は不変）
     assert neu_detail["_regime"] == "neutral"
 
 
@@ -359,7 +361,8 @@ def test_evaluate_risk_on_amplifies_trend():
     base = evaluate(df, _base_configs(), 2, -2)                  # regime=None
     on = evaluate(df, _base_configs(), 2, -2, regime="risk_on")
     assert base[2]["_groups"]["trend"] == 1
-    assert on[0] == base[0] + 1                                  # trend×2 で +1
+    assert on[2]["_groups"] == base[2]["_groups"]               # 重み前グループはレジーム非依存
+    assert on[0] == base[0] + 1                                  # trend×2 で +1（他は不変）
     assert on[2]["_regime"] == "risk_on"
 
 
@@ -369,7 +372,8 @@ def test_evaluate_neutral_amplifies_contrarian():
     base = evaluate(df, _base_configs(), 2, -2)
     neu = evaluate(df, _base_configs(), 2, -2, regime="neutral")
     assert base[2]["_groups"]["contrarian"] == 1
-    assert neu[0] == base[0] + 1                                 # contrarian×2 で +1
+    assert neu[2]["_groups"] == base[2]["_groups"]             # 重み前グループはレジーム非依存
+    assert neu[0] == base[0] + 1                                 # contrarian×2 で +1（他は不変）
     assert neu[2]["_regime"] == "neutral"
 
 

@@ -250,6 +250,8 @@ GROUP_CAP = 1   # グループ内の最大寄与（±）
 REGIME_GROUP_WEIGHTS: dict[str, dict[str, int]] = {
     "risk_on":  {"trend": 2, "contrarian": 1, "volume": 1, "pattern": 1},
     "neutral":  {"trend": 1, "contrarian": 2, "volume": 1, "pattern": 1},
+    # risk_off も risk_on と同様に trend 主体（逆張りの「落ちるナイフ」買いの方向制御は
+    # 打ち手3 のレジームゲートが別軸で担う）。risk_on と同値だが意図的な重複。
     "risk_off": {"trend": 2, "contrarian": 1, "volume": 1, "pattern": 1},
 }
 
