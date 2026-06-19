@@ -316,6 +316,38 @@ def test_score_detail_has_groups_within_cap():
         assert -1 <= v <= 1
 
 
+def test_score_indicators_risk_on_doubles_trend():
+    """risk_on は trend グループを ×2 にする（順張り主体）。"""
+    df_ind = signals.add_indicators(_idx(np.linspace(1000, 1300, 120)))  # 上昇 → trend買い
+    cfg = _base_configs()
+    none_score, none_detail = signals._score_indicators(df_ind, cfg)            # regime=None
+    on_score, on_detail = signals._score_indicators(df_ind, cfg, "risk_on")
+    assert none_detail["_groups"]["trend"] == 1                                  # 順張りが買い側
+    assert on_score == none_score + none_detail["_groups"]["trend"]             # trend のみ ×2
+    assert on_detail["_regime"] == "risk_on"
+    assert isinstance(on_score, int)                                            # 整数重み×int → int
+
+
+def test_score_indicators_neutral_doubles_contrarian():
+    """neutral は contrarian グループを ×2 にする（レンジでの逆張り）。"""
+    df_ind = signals.add_indicators(_declining_df())                            # 売られすぎ → 逆張り買い
+    cfg = _base_configs()
+    none_score, none_detail = signals._score_indicators(df_ind, cfg)
+    neu_score, neu_detail = signals._score_indicators(df_ind, cfg, "neutral")
+    assert none_detail["_groups"]["contrarian"] == 1
+    assert neu_score == none_score + none_detail["_groups"]["contrarian"]       # contrarian のみ ×2
+    assert neu_detail["_regime"] == "neutral"
+
+
+def test_score_indicators_regime_none_equals_unweighted():
+    """regime=None → 全重み1 → 打ち手4と完全一致（クリップ後グループの単純合計）。"""
+    df_ind = signals.add_indicators(_declining_df())
+    cfg = _base_configs()
+    score, detail = signals._score_indicators(df_ind, cfg)
+    assert score == sum(detail["_groups"].values())
+    assert detail["_regime"] is None
+
+
 if __name__ == "__main__":
     test_evaluate_returns_valid_direction()
     test_golden_dead_cross_are_exclusive()

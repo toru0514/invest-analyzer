@@ -244,13 +244,30 @@ INDICATOR_GROUP = {
 }
 GROUP_CAP = 1   # グループ内の最大寄与（±）
 
+# レジーム別グループ重み（打ち手5）。グループ純額(±GROUP_CAP)に乗じてから合算する。
+# トレンド時は順張り(trend)、レンジ時は逆張り(contrarian)を主役にする。
+# regime が None / 未知 → 全グループ 1（重みなし＝打ち手4の挙動）。
+REGIME_GROUP_WEIGHTS: dict[str, dict[str, int]] = {
+    "risk_on":  {"trend": 2, "contrarian": 1, "volume": 1, "pattern": 1},
+    "neutral":  {"trend": 1, "contrarian": 2, "volume": 1, "pattern": 1},
+    "risk_off": {"trend": 2, "contrarian": 1, "volume": 1, "pattern": 1},
+}
 
-def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[int, dict]:
+
+def _group_weight(regime: str | None, group: str) -> int:
+    """レジーム×グループの整数重み。未知レジーム/未知グループは 1（安全フォールバック）。"""
+    return REGIME_GROUP_WEIGHTS.get(regime, {}).get(group, 1)
+
+
+def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]],
+                      regime: str | None = None) -> tuple[int, dict]:
     """指標列が計算済みの DataFrame の最終行をスコアリング（状態ベース・グループ化）。
 
     各指標は ±weight を出すが、相関グループ（順張り/逆張り/需給/パターン）ごとに合算して
     ±GROUP_CAP にクリップしてから合算する。これにより逆張り系5指標の多重カウントを止める。
     すべて当日までのデータのみ参照（look-ahead bias なし）。
+    最後にグループ純額にレジーム別重み（打ち手5）を乗じて合算する：
+    score = Σ weight(regime, group) × clip(group, ±GROUP_CAP)。regime=None は全重み1（＝打ち手4）。
     """
     group_raw: dict[str, int] = {}
     detail: dict = {}
@@ -368,8 +385,9 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]]) -> tuple[
             continue   # スコア対象外（即通知の別経路）
 
     groups = {g: max(-GROUP_CAP, min(GROUP_CAP, raw)) for g, raw in group_raw.items()}
-    detail["_groups"] = groups
-    score = sum(groups.values())
+    detail["_groups"] = groups            # クリップ後・重み適用前の純額（解釈性）
+    detail["_regime"] = regime            # どのレジームで重み付けたか
+    score = sum(_group_weight(regime, g) * v for g, v in groups.items())
     return score, detail
 
 
