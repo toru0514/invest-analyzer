@@ -403,11 +403,13 @@ def evaluate(
     buy_threshold / sell_threshold は UI から調整可能（DB 保存値を渡す）。
     戻り値: (score, direction, detail)。detail には各指標の個別寄与に加え、
     detail["_groups"]（順張り/逆張り/需給/パターンのグループ別純額・打ち手4）が入る。
+    打ち手5: グループ純額はレジーム別重み（risk_on/off=trend重視、neutral=contrarian重視）で
+    合算され、detail["_regime"] に適用レジームが入る（detail["_groups"] は重み適用前の純額）。
     """
     if configs is None:
         configs = DEFAULT_CONFIGS
     df_ind = add_indicators(df)
-    score, detail = _score_indicators(df_ind, configs)
+    score, detail = _score_indicators(df_ind, configs, regime)
 
     # --- 強化1: 出来高フィルター（スコアにボーナス/減衰） ---
     vf = _find_cfg(configs, "volume_filter")

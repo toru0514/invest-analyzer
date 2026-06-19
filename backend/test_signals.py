@@ -245,14 +245,19 @@ def test_regime_series_is_causal_and_aligned():
         assert s.iloc[i] == market_regime(df.iloc[:i + 1])
 
 
-def test_evaluate_regime_records_and_no_change_when_not_risk_off():
+def test_evaluate_risk_on_records_regime_no_off_gate():
+    """risk_on は regime を記録するが、risk_off ゲート（打ち手3）は発火しない。
+
+    打ち手5 で risk_on はスコア重みを変える（別テストで担保）が、方向ペナルティ（ゲート）は
+    risk_off 限定のまま＝重み付けとゲートは別軸で共存する。
+    """
     from signals import evaluate, DEFAULT_CONFIGS
     from market import synthetic_history
     df = synthetic_history("X.T", seed=3)
-    base = evaluate(df, DEFAULT_CONFIGS, 2, -2)
     on = evaluate(df, DEFAULT_CONFIGS, 2, -2, regime="risk_on")
-    assert on[2]["regime"] == "risk_on"
-    assert (on[0], on[1]) == (base[0], base[1])
+    assert on[2]["regime"] == "risk_on"        # ゲート側の記録（evaluate）
+    assert on[2]["_regime"] == "risk_on"        # 重み側の記録（_score_indicators）
+    assert "regime_filter" not in on[2]         # risk_off ゲートは発火しない
 
 
 def test_evaluate_regime_off_penalizes_a_buy_signal():
@@ -346,6 +351,26 @@ def test_score_indicators_regime_none_equals_unweighted():
     score, detail = signals._score_indicators(df_ind, cfg)
     assert score == sum(detail["_groups"].values())
     assert detail["_regime"] is None
+
+
+def test_evaluate_risk_on_amplifies_trend():
+    """evaluate 経由で risk_on の trend×2 が反映される（バックテストにも自動反映される配線）。"""
+    df = _idx(np.linspace(1000, 1300, 120))                     # 上昇 → trend買い
+    base = evaluate(df, _base_configs(), 2, -2)                  # regime=None
+    on = evaluate(df, _base_configs(), 2, -2, regime="risk_on")
+    assert base[2]["_groups"]["trend"] == 1
+    assert on[0] == base[0] + 1                                  # trend×2 で +1
+    assert on[2]["_regime"] == "risk_on"
+
+
+def test_evaluate_neutral_amplifies_contrarian():
+    """evaluate 経由で neutral の contrarian×2 が反映される。"""
+    df = _declining_df()                                         # 売られすぎ → 逆張り買い
+    base = evaluate(df, _base_configs(), 2, -2)
+    neu = evaluate(df, _base_configs(), 2, -2, regime="neutral")
+    assert base[2]["_groups"]["contrarian"] == 1
+    assert neu[0] == base[0] + 1                                 # contrarian×2 で +1
+    assert neu[2]["_regime"] == "neutral"
 
 
 if __name__ == "__main__":
