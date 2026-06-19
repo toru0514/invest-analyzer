@@ -116,6 +116,14 @@ def test_settings_get_and_update(client):
     assert s2["scheduler_enabled"] is True
     assert s2["scheduler_time"] == "15:30"
 
+    # 打ち手6: top_n（既定3）
+    assert s["top_n"] == 3
+    client.put("/settings", json={"top_n": 5})
+    assert client.get("/settings").json()["top_n"] == 5
+    client.put("/settings", json={"top_n": -2})            # 負値はフォールバック（既定3）
+    assert client.get("/settings").json()["top_n"] == 3
+    client.put("/settings", json={"top_n": 3})             # 後始末
+
     # 既定に戻す（他テストへ影響しないように）
     client.put("/settings", json={"buy_threshold": 2, "scheduler_enabled": False})
 

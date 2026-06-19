@@ -138,6 +138,17 @@ class SettingsUpdate(BaseModel):
     scheduler_time: Optional[str] = None
     scheduler_demo: Optional[bool] = None
     scheduler_skip_holidays: Optional[bool] = None
+    top_n: Optional[int] = None
+
+
+def _safe_top_n(raw) -> int:
+    # 負値・非整数は既定3にフォールバック（0は有効＝「今夜の推奨」セクション非表示）。
+    # clamp-to-0（max(0,...)）にしないこと: 負値は無効入力として既定へ戻す契約（put_settings と一致）。
+    try:
+        v = int(raw)
+        return v if v >= 0 else 3
+    except (TypeError, ValueError):
+        return 3
 
 
 @app.get("/settings")
@@ -150,6 +161,7 @@ def get_settings():
         "scheduler_time": m.get("scheduler_time", "16:00"),
         "scheduler_demo": m.get("scheduler_demo", "0") == "1",
         "scheduler_skip_holidays": m.get("scheduler_skip_holidays", "1") == "1",
+        "top_n": _safe_top_n(m.get("top_n", "3")),
     }
 
 
@@ -167,6 +179,8 @@ def put_settings(payload: SettingsUpdate):
         db.set_meta("scheduler_demo", "1" if payload.scheduler_demo else "0")
     if payload.scheduler_skip_holidays is not None:
         db.set_meta("scheduler_skip_holidays", "1" if payload.scheduler_skip_holidays else "0")
+    if payload.top_n is not None:
+        db.set_meta("top_n", str(payload.top_n) if payload.top_n >= 0 else "3")
     return get_settings()
 
 
