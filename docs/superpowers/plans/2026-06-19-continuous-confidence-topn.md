@@ -507,21 +507,24 @@ Expected: FAIL（`KeyError: 'top_n'`）
         "top_n": _safe_top_n(m.get("top_n", "3")),
 ```
 
-`get_settings` の直前にヘルパを追加:
+`get_settings` の直前にヘルパを追加。負値・非整数は既定3へフォールバック（0は有効＝非表示。`max(0,...)` でクランプしないこと＝負値は無効入力として既定へ戻す契約）:
 
 ```python
 def _safe_top_n(raw) -> int:
+    # 負値・非整数は既定3にフォールバック（0は有効＝「今夜の推奨」セクション非表示）。
+    # clamp-to-0（max(0,...)）にしないこと: 負値は無効入力として既定へ戻す契約（put_settings と一致）。
     try:
-        return max(0, int(raw))
+        v = int(raw)
+        return v if v >= 0 else 3
     except (TypeError, ValueError):
         return 3
 ```
 
-`put_settings`（~169、`scheduler_skip_holidays` の後）に追加。保存時も負値をクランプ:
+`put_settings`（~169、`scheduler_skip_holidays` の後）に追加。負値は既定3へ（0/正は保存）。読み書きで負値→3 を一致させる:
 
 ```python
     if payload.top_n is not None:
-        db.set_meta("top_n", max(0, payload.top_n))
+        db.set_meta("top_n", str(payload.top_n) if payload.top_n >= 0 else "3")
 ```
 
 - [ ] **Step 4: 成功＋全 backend グリーンを確認**
