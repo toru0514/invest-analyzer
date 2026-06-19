@@ -256,17 +256,29 @@ def test_evaluate_regime_records_and_no_change_when_not_risk_off():
 
 
 def test_evaluate_regime_off_penalizes_a_buy_signal():
-    from signals import evaluate, DEFAULT_CONFIGS
-    from market import synthetic_history
-    for seed in range(20):
-        df = synthetic_history("X.T", seed=seed)
-        bs, bd, _ = evaluate(df, DEFAULT_CONFIGS, 2, -2)
-        if bd == "buy":
-            os_, od, odt = evaluate(df, DEFAULT_CONFIGS, 2, -2, regime="risk_off")
-            assert os_ == bs - 2
-            assert odt["regime_filter"] == -2
-            return
-    raise AssertionError("buy シグナルの合成データが見つからない（前提を見直す）")
+    """risk_off は買い判定にゲート減点(-2)を課す（打ち手3）。打ち手5の重み付け後に適用される。
+
+    単一の逆張り指標(rsi)＋売られすぎの統制データで決定論化。rsi は contrarian グループで
+    risk_off の重みは 1（重み付けの影響を受けない）ため、ゲート減点だけを厳密に検証できる。
+    ゲートは config-gated（`evaluate` 内 `_find_cfg(configs, "market_regime")` が None だと
+    発火しない）ため、cfg に market_regime ルールを必ず含める（剥がすとゲートが効かない）。
+    market_regime は `_score_indicators` ではスコア対象外なので base スコアには影響しない。
+    """
+    cfg = [
+        {"rule_type": "rsi", "params": {"length": 14, "low": 30, "high": 70},
+         "weight": 1, "enabled": 1},
+        {"rule_type": "market_regime",
+         "params": {"mode": "penalty", "penalty": 2, "sma": 13,
+                    "dd_lookback": 60, "dd_threshold": 0.10},
+         "weight": 1, "enabled": 1},
+    ]
+    df = _declining_df()                                  # 売られすぎ → rsi が買い(+1)
+    base = evaluate(df, cfg, 1, -1)                       # regime=None → score=1, buy
+    assert (base[0], base[1]) == (1, "buy")
+    off = evaluate(df, cfg, 1, -1, regime="risk_off")
+    assert off[2]["regime_filter"] == -2                 # ゲートが発火
+    assert off[0] == base[0] - 2                          # 重み付け不変(contrarian×1)＋ゲートで-2
+    assert off[1] != "buy"                                # 買いが抑制される
 
 
 def _declining_df(n=80):
