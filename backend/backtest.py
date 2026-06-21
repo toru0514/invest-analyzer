@@ -25,11 +25,22 @@ def _regime_at(regime_series, d):
     return None if v is None or (isinstance(v, float) and pd.isna(v)) else v
 
 
+def _rs_at(index_history, rs_params, window, d):
+    """評価日 d 時点の相対力強度を返す（index_history/rs_params 未指定で None）。"""
+    if index_history is None or rs_params is None:
+        return None
+    from signals import relative_strength
+    return relative_strength(window, index_history,
+                             n=int(rs_params.get("period", 20)),
+                             scale=float(rs_params.get("scale", 0.10)), asof=d)
+
+
 def run_backtest(
     histories, configs=None, initial_capital=INITIAL_CAPITAL,
     backtest_days=BACKTEST_DAYS, warmup_days=WARMUP_DAYS,
     buy_threshold=BUY_THRESHOLD, sell_threshold=SELL_THRESHOLD,
     exit_mode="score", cost=None, eval_start_date=None, regime_series=None,
+    index_history=None, rs_params=None,
 ) -> dict:
     """exit_mode='score'（既定）はスコア反転で決済。'plan'（旧'atr'）は提示指値で約定する出口入り。
 
@@ -65,7 +76,8 @@ def run_backtest(
             if len(window) < warmup_days:
                 continue
             score, direction, detail = evaluate(window, configs, buy_threshold, sell_threshold,
-                                                regime=_regime_at(regime_series, d))
+                                                regime=_regime_at(regime_series, d),
+                                                rs_strength=_rs_at(index_history, rs_params, window, d))
             raw = float(window["close"].iloc[-1])
 
             if direction == "buy" and cash > 0:
@@ -107,7 +119,8 @@ def run_backtest(
         last_close = float(df["close"].iloc[-1])
         final_value += holdings[ticker] * last_close
         score, direction, detail = evaluate(df, configs, buy_threshold, sell_threshold,
-                                            regime=_regime_at(regime_series, df.index[-1]))
+                                            regime=_regime_at(regime_series, df.index[-1]),
+                                            rs_strength=_rs_at(index_history, rs_params, df, df.index[-1]))
         signal_rows.append({"ticker": ticker, "price": last_close,
                             "score": score, "direction": direction, "detail": detail})
 

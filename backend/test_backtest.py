@@ -133,3 +133,28 @@ def test_run_backtest_passes_asof_regime_to_evaluate(monkeypatch):
     # レジームが evaluate に届き、下降指数なので risk_off が含まれる（asof・causal）
     assert any(r == "risk_off" for r in seen)
     assert all(r in ("risk_on", "neutral", "risk_off") for r in seen if r is not None)
+
+
+def test_run_backtest_rs_none_is_backward_compatible():
+    from market import synthetic_history
+    import backtest
+    hist = {f"T{i}.T": synthetic_history(f"T{i}.T", n=120, seed=i) for i in range(3)}
+    base = backtest.run_backtest(hist, buy_threshold=2, sell_threshold=-2)
+    # index_history/rs_params 未指定 = 従来結果（実戻り値キーで固定）
+    explicit = backtest.run_backtest(hist, buy_threshold=2, sell_threshold=-2,
+                                     index_history=None, rs_params=None)
+    assert base["pnl_pct"] == explicit["pnl_pct"]
+    assert base["trade_count"] == explicit["trade_count"]
+
+
+def test_run_backtest_rs_supplied_runs_and_keeps_trades():
+    from market import synthetic_history
+    import backtest
+    hist = {f"T{i}.T": synthetic_history(f"T{i}.T", n=120, seed=i) for i in range(3)}
+    idx = synthetic_history("IDX.T", n=120, seed=99)
+    base = backtest.run_backtest(hist, buy_threshold=2, sell_threshold=-2)
+    rs = backtest.run_backtest(hist, buy_threshold=2, sell_threshold=-2,
+                               index_history=idx, rs_params={"period": 20, "scale": 0.10})
+    # RS は score/direction を動かさない（score モード）→ 売買・PnL は不変
+    assert rs["trade_count"] == base["trade_count"]
+    assert rs["pnl_pct"] == base["pnl_pct"]
