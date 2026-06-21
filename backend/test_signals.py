@@ -481,3 +481,42 @@ if __name__ == "__main__":
     test_resolve_configs_overrides_per_ticker()
     test_atr_exit_backtest_has_extra_metrics()
     print("all smoke tests passed")
+
+
+def test_relative_strength_sign_and_none():
+    import numpy as np
+    # 銘柄が指数より強く上昇 → excess>0 → s_rs>0
+    strong = _idx(np.linspace(1000, 1300, 60))   # +30%
+    weak_index = _idx(np.linspace(1000, 1050, 60))  # +5%
+    s = signals.relative_strength(strong, weak_index, n=20, scale=0.10)
+    assert s is not None and s > 0
+    # 銘柄が指数より弱い → s_rs<0
+    s2 = signals.relative_strength(weak_index, strong, n=20, scale=0.10)
+    assert s2 is not None and s2 < 0
+    # 同一推移 → ≈0
+    s3 = signals.relative_strength(strong, strong, n=20, scale=0.10)
+    assert abs(s3) < 1e-9
+    # データ不足 → None
+    assert signals.relative_strength(_idx([1000, 1100]), strong, n=20, scale=0.10) is None
+    # 範囲
+    assert -1.0 <= s <= 1.0
+
+
+def test_relative_strength_monotonic_and_lookahead():
+    import numpy as np
+    idx = _idx(np.linspace(1000, 1000, 60))   # 指数フラット
+    mild = _idx(np.linspace(1000, 1100, 60))  # +10%
+    big = _idx(np.linspace(1000, 1300, 60))   # +30%
+    s_mild = signals.relative_strength(mild, idx, n=20, scale=0.10)
+    s_big = signals.relative_strength(big, idx, n=20, scale=0.10)
+    assert s_big > s_mild > 0                 # 強いほど大（単調）
+    # look-ahead: asof 以降にバーを足しても asof 時点で切れば値は不変。
+    # 注意: _idx は終端日付を 2026-06-01 に固定するため、asof は「末尾」ではなく
+    # ramp 終端の位置インデックスで取る（full と truncated で同じ評価日に揃える）。
+    full = _idx(np.concatenate([np.linspace(1000, 1300, 60),
+                                np.linspace(1300, 2000, 10)]))   # 70点・後半は未来側の急騰
+    idxf = _idx(np.full(70, 1000.0))
+    asof = full.index[59]                                        # 60本目（ramp 終端）を評価日に固定
+    s_asof = signals.relative_strength(full, idxf, n=20, scale=0.10, asof=asof)
+    s_trunc = signals.relative_strength(full.iloc[:60], idxf.iloc[:60], n=20, scale=0.10)
+    assert abs(s_asof - s_trunc) < 1e-9                          # 未来 10 本は asof で除外され不変

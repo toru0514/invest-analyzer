@@ -254,6 +254,7 @@ DISPARITY_STRENGTH_SPAN = 7.0  # 乖離率 閾値超過分の正規化幅（%）
 VOL_BOOST = 1.15       # 出来高サージ時の確信度ブースト
 VOL_DISCOUNT = 0.7     # 出来高細り時（direction 生存時）の確信度ディスカウント
 GATE_DISCOUNT = 0.6    # レジーム/週足ゲート penalty 時の確信度ディスカウント
+RS_STRENGTH_SCALE = 0.10   # 指数対比の超過リターンを tanh で正規化する係数（20日で+10%超過→s≈0.76）
 
 # レジーム別グループ重み（打ち手5）。グループ純額(±GROUP_CAP)に乗じてから合算する。
 # トレンド時は順張り(trend)、レンジ時は逆張り(contrarian)を主役にする。
@@ -302,6 +303,35 @@ def _tanh_strength(x: float, scale: float) -> float:
     if scale <= 0:
         return 0.0
     return math.tanh(x / scale)
+
+
+def relative_strength(ticker_df, index_df, n: int = 20,
+                      scale: float = RS_STRENGTH_SCALE,
+                      asof=None) -> float | None:
+    """指数対比の相対力（超過リターン）を符号付き強度 ∈[-1,1] で返す。
+
+    s = tanh((銘柄のn日リターン − 指数のn日リターン) / scale)。+ = 指数をアウトパフォーム（買い寄り）。
+    asof（評価日 Timestamp）が与えられたら双方を asof 以前に絞ってから末尾と n 本前を取る
+    （look-ahead 回避を呼び出し側でなくヘルパに閉じ込める）。データ不足/ゼロ除算は None。
+    """
+    def _ret(df):
+        if df is None or "close" not in df:
+            return None
+        s = df["close"]
+        if asof is not None:
+            s = s[s.index <= asof]
+        if len(s) < n + 1:
+            return None
+        base = float(s.iloc[-(n + 1)])
+        if base <= 0:
+            return None
+        return float(s.iloc[-1]) / base - 1.0
+
+    rt = _ret(ticker_df)
+    ri = _ret(index_df)
+    if rt is None or ri is None:
+        return None
+    return _tanh_strength(rt - ri, scale)
 
 
 def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]],
