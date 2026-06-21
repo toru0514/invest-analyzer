@@ -557,3 +557,20 @@ def test_score_indicators_rs_regime_weight():
     assert -1.0 <= neu["_strength_net"] <= 1.0
     assert signals._group_weight("risk_on", "rs") == 2
     assert signals._group_weight("neutral", "rs") == 1
+
+
+def test_evaluate_rs_affects_confidence_not_direction():
+    import numpy as np
+    df = _idx(np.linspace(1000, 1300, 120))
+    base = evaluate(df, _base_configs(), 1, -1)                       # rs 無し
+    strong = evaluate(df, _base_configs(), 1, -1, rs_strength=1.0)    # 強い相対力
+    # direction/score は不変（後方互換）
+    assert strong[0] == base[0] and strong[1] == base[1]
+    assert isinstance(strong[0], int)
+    # confidence は変化しうる（rs が織り込まれる）／範囲保証
+    assert 0 <= strong[2]["confidence"] <= 100
+    assert strong[2]["rs"] == 1.0
+    # None 既定は完全後方互換
+    none_eval = evaluate(df, _base_configs(), 1, -1, rs_strength=None)
+    assert none_eval[2]["confidence"] == base[2]["confidence"]
+    assert "rs" not in none_eval[2]

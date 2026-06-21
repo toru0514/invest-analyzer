@@ -514,6 +514,7 @@ def evaluate(
     buy_threshold: int = BUY_THRESHOLD,
     sell_threshold: int = SELL_THRESHOLD,
     regime: str | None = None,
+    rs_strength: float | None = None,
 ):
     """df: OHLCV（小文字列・古い順）。最終行についてスコア判定する。
 
@@ -526,7 +527,7 @@ def evaluate(
     if configs is None:
         configs = DEFAULT_CONFIGS
     df_ind = add_indicators(df)
-    score, detail = _score_indicators(df_ind, configs, regime)
+    score, detail = _score_indicators(df_ind, configs, regime, rs_strength)
 
     # --- 強化1: 出来高フィルター（スコアにボーナス/減衰） ---
     vf = _find_cfg(configs, "volume_filter")
