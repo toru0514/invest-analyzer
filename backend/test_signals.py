@@ -520,3 +520,40 @@ def test_relative_strength_monotonic_and_lookahead():
     s_asof = signals.relative_strength(full, idxf, n=20, scale=0.10, asof=asof)
     s_trunc = signals.relative_strength(full.iloc[:60], idxf.iloc[:60], n=20, scale=0.10)
     assert abs(s_asof - s_trunc) < 1e-9                          # 未来 10 本は asof で除外され不変
+
+
+# --- 打ち手7: _score_indicators への RS 注入 ---
+def test_score_indicators_rs_backward_compat_when_none():
+    import numpy as np
+    df = signals.add_indicators(_idx(np.linspace(1000, 1300, 120)))
+    _, d_no = signals._score_indicators(df, _base_configs())          # rs_strength 既定 None
+    _, d_explicit = signals._score_indicators(df, _base_configs(), None, None)
+    # None 供給で _strength_net も score も完全一致（後方互換）
+    assert d_no["_strength_net"] == d_explicit["_strength_net"]
+    assert "rs" not in d_no.get("_strengths", {})
+
+
+def test_score_indicators_rs_enters_strength_net():
+    import numpy as np
+    df = signals.add_indicators(_idx(np.linspace(1000, 1300, 120)))   # trend 買い・強度高
+    _, d_base = signals._score_indicators(df, _base_configs())
+    # 負の rs（指数アンダーパフォーム）→ 分子を下げて _strength_net は下がる（spec §4.2）
+    _, d_weak = signals._score_indicators(df, _base_configs(), None, -0.5)
+    assert d_weak["_strength_net"] < d_base["_strength_net"]
+    assert d_weak["rs"] == -0.5
+    # 最大の正 rs → 分子増分が効き上がる
+    _, d_strong = signals._score_indicators(df, _base_configs(), None, 1.0)
+    assert d_strong["_strength_net"] > d_base["_strength_net"]
+    assert -1.0 <= d_strong["_strength_net"] <= 1.0
+
+
+def test_score_indicators_rs_regime_weight():
+    import numpy as np
+    df = signals.add_indicators(_idx(np.linspace(1000, 1300, 120)))
+    # risk_on は rs 重み2 / neutral は1。同じ rs でも risk_on の方が rs 寄与の比重が大きい。
+    _, on = signals._score_indicators(df, _base_configs(), "risk_on", 1.0)
+    _, neu = signals._score_indicators(df, _base_configs(), "neutral", 1.0)
+    assert -1.0 <= on["_strength_net"] <= 1.0
+    assert -1.0 <= neu["_strength_net"] <= 1.0
+    assert signals._group_weight("risk_on", "rs") == 2
+    assert signals._group_weight("neutral", "rs") == 1

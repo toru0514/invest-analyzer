@@ -260,11 +260,12 @@ RS_STRENGTH_SCALE = 0.10   # 指数対比の超過リターンを tanh で正規
 # トレンド時は順張り(trend)、レンジ時は逆張り(contrarian)を主役にする。
 # regime が None / 未知 → 全グループ 1（重みなし＝打ち手4の挙動）。
 REGIME_GROUP_WEIGHTS: dict[str, dict[str, int]] = {
-    "risk_on":  {"trend": 2, "contrarian": 1, "volume": 1, "pattern": 1},
-    "neutral":  {"trend": 1, "contrarian": 2, "volume": 1, "pattern": 1},
+    # rs は trend 同様のモメンタム重み。risk_off だけ 1 で落ちる相場の相対力買いを抑える意図的非対称。
+    "risk_on":  {"trend": 2, "contrarian": 1, "volume": 1, "pattern": 1, "rs": 2},
+    "neutral":  {"trend": 1, "contrarian": 2, "volume": 1, "pattern": 1, "rs": 1},
     # risk_off も risk_on と同様に trend 主体（逆張りの「落ちるナイフ」買いの方向制御は
     # 打ち手3 のレジームゲートが別軸で担う）。risk_on と同値だが意図的な重複。
-    "risk_off": {"trend": 2, "contrarian": 1, "volume": 1, "pattern": 1},
+    "risk_off": {"trend": 2, "contrarian": 1, "volume": 1, "pattern": 1, "rs": 1},
 }
 
 
@@ -335,7 +336,8 @@ def relative_strength(ticker_df, index_df, n: int = 20,
 
 
 def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]],
-                      regime: str | None = None) -> tuple[int, dict]:
+                      regime: str | None = None,
+                      rs_strength: float | None = None) -> tuple[int, dict]:
     """指標列が計算済みの DataFrame の最終行をスコアリング（状態ベース・グループ化）。
 
     各指標は ±weight を出すが、相関グループ（順張り/逆張り/需給/パターン）ごとに合算して
@@ -491,9 +493,13 @@ def _score_indicators(df: pd.DataFrame, configs: list[dict[str, Any]],
         g = INDICATOR_GROUP.get(key, "pattern" if key in _CANDLE_KEYS else key)
         sgroup_raw[g] = sgroup_raw.get(g, 0.0) + s
     sgroups = {g: max(-GROUP_CAP, min(GROUP_CAP, raw)) for g, raw in sgroup_raw.items()}
-    # 固定4グループ分母で正規化する（欠けたグループは 0 寄与）＝有効指標が少ないほど確信度は
-    # 低めに出る。これは「証拠が薄いほど自信を持たない」という意図的な保守側の設計（spec §4.2）。
+    # 固定4グループ分母で正規化（欠けたグループは 0 寄与）。RS 供給時のみ5グループ目に拡張する。
     _CONF_GROUPS = ("trend", "contrarian", "volume", "pattern")
+    if rs_strength is not None:
+        strengths["rs"] = rs_strength
+        sgroups["rs"] = max(-GROUP_CAP, min(GROUP_CAP, float(rs_strength)))
+        detail["rs"] = round(float(rs_strength), 3)
+        _CONF_GROUPS = _CONF_GROUPS + ("rs",)
     wmax = sum(_group_weight(regime, g) * GROUP_CAP for g in _CONF_GROUPS)
     anum = sum(_group_weight(regime, g) * sgroups.get(g, 0.0) for g in _CONF_GROUPS)
     detail["_strength_net"] = (anum / wmax) if wmax else 0.0
