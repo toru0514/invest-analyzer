@@ -123,9 +123,9 @@ def test_run_backtest_passes_asof_regime_to_evaluate(monkeypatch):
     seen = []
     real = bt_mod.evaluate
 
-    def spy(df, configs, bth, sth, regime=None):
+    def spy(df, configs, bth, sth, regime=None, rs_strength=None):
         seen.append(regime)
-        return real(df, configs, bth, sth, regime=regime)
+        return real(df, configs, bth, sth, regime=regime, rs_strength=rs_strength)
 
     monkeypatch.setattr(bt_mod, "evaluate", spy)
     bt_mod.run_backtest({"X.T": stock}, configs=DEFAULT_CONFIGS, exit_mode="plan",
@@ -158,3 +158,18 @@ def test_run_backtest_rs_supplied_runs_and_keeps_trades():
     # RS は score/direction を動かさない（score モード）→ 売買・PnL は不変
     assert rs["trade_count"] == base["trade_count"]
     assert rs["pnl_pct"] == base["pnl_pct"]
+
+
+def test_run_backtest_plan_rs_invariant():
+    from market import synthetic_history
+    import backtest
+    hist = {f"P{i}.T": synthetic_history(f"P{i}.T", n=120, seed=i) for i in range(2)}
+    idx = synthetic_history("IDX.T", n=120, seed=77)
+    base = backtest.run_backtest(hist, configs=None, exit_mode="plan", backtest_days=40,
+                                 buy_threshold=2, sell_threshold=-2)
+    rs = backtest.run_backtest(hist, configs=None, exit_mode="plan", backtest_days=40,
+                               buy_threshold=2, sell_threshold=-2,
+                               index_history=idx, rs_params={"period": 20, "scale": 0.10})
+    # build_plan は confidence/rs を参照しない → 約定・PnL は不変（実戻り値キー）
+    assert rs["closed_trades"] == base["closed_trades"]
+    assert rs["pnl_amount"] == base["pnl_amount"]

@@ -53,7 +53,8 @@ def run_backtest(
     if exit_mode in ("plan", "atr"):
         return _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                                   warmup_days, buy_threshold, sell_threshold, cost,
-                                  eval_start_date, regime_series)
+                                  eval_start_date, regime_series,
+                                  index_history=index_history, rs_params=rs_params)
 
     n_tickers = len(histories)
     cash = initial_capital
@@ -146,7 +147,8 @@ def run_backtest(
 
 def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                        warmup_days, buy_threshold, sell_threshold, cost,
-                       eval_start_date, regime_series=None) -> dict:
+                       eval_start_date, regime_series=None,
+                       index_history=None, rs_params=None) -> dict:
     """提示指値（build_plan）で約定し、ATR の損切/利確で決済する出口入りシミュレーション。
 
     検証=提示：作戦ボードと同一の limit_price/stop_price/target_price で約定検証する。
@@ -213,7 +215,8 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
             window = df.iloc[:i + 1]
             if len(window) >= warmup_days:
                 score, direction, _ = evaluate(window, configs, buy_threshold, sell_threshold,
-                                               regime=_regime_at(regime_series, df.index[i]))
+                                               regime=_regime_at(regime_series, df.index[i]),
+                                               rs_strength=_rs_at(index_history, rs_params, window, df.index[i]))
                 if shares > 0 and direction == "sell":
                     fill = apply_costs(close, "sell", cost)
                     proceeds = shares * fill
@@ -239,7 +242,8 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
         last_close = float(df["close"].iloc[-1])
         final_value += cash + shares * last_close
         score, direction, detail = evaluate(df, configs, buy_threshold, sell_threshold,
-                                            regime=_regime_at(regime_series, df.index[-1]))
+                                            regime=_regime_at(regime_series, df.index[-1]),
+                                            rs_strength=_rs_at(index_history, rs_params, df, df.index[-1]))
         signal_rows.append({"ticker": ticker, "price": last_close, "score": score,
                             "direction": direction, "detail": detail})
 
