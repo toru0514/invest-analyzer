@@ -38,7 +38,8 @@ def summary_stats(pnls: list[float], min_trades: int = MIN_TRADES) -> dict:
 
 def benchmark(histories, configs, *, buy_threshold, sell_threshold,
               initial_capital, warmup_days, backtest_days, cost=None,
-              eval_start_date=None, regime_series=None) -> dict:
+              eval_start_date=None, regime_series=None,
+              index_history=None, rs_params=None) -> dict:
     """評価窓のベンチマーク2種。(a) ユニバース等加重 buy&hold、(b) 全シグナル等加重（素のシグナル運用）。
 
     eval_start_date 指定時は評価窓をその日以降（out-of-sample）に限定する。戦略の評価窓と揃える。
@@ -60,7 +61,8 @@ def benchmark(histories, configs, *, buy_threshold, sell_threshold,
                          backtest_days=backtest_days, warmup_days=warmup_days,
                          buy_threshold=buy_threshold, sell_threshold=sell_threshold,
                          exit_mode="score", cost=cost, eval_start_date=eval_start_date,
-                         regime_series=regime_series)
+                         regime_series=regime_series,
+                         index_history=index_history, rs_params=rs_params)
     return {"buy_hold_pct": buy_hold_pct, "all_signals_pct": naive["pnl_pct"]}
 
 
@@ -76,15 +78,18 @@ def _split_date(histories, split_ratio):
 
 
 def evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=None, cost=None,
-                     initial_capital=3000.0, warmup_days=35, regime_series=None) -> dict:
+                     initial_capital=3000.0, warmup_days=35, regime_series=None,
+                     index_history=None, rs_params=None) -> dict:
     """シンプルホールドアウト2段構え：train(in-sample) で閾値を選び test(out-of-sample) で評価。
 
     look-ahead 回避：test 窓のパラメータは train 窓の成績のみから選ぶ。
     """
     from backtest import run_backtest
+    from signals import DEFAULT_CONFIGS as _DEFAULT_CONFIGS
 
     grid = grid or DEFAULT_GRID
     cost = cost or DEFAULT_COST
+    configs = configs if configs is not None else _DEFAULT_CONFIGS
     split = _split_date(histories, split_ratio)
 
     # train：各銘柄を split 以前にスライスし、全期間（warmup以降）で評価
@@ -95,7 +100,8 @@ def evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=None, cost=Non
         return run_backtest(hist, configs=cfgs, initial_capital=initial_capital,
                             backtest_days=big, warmup_days=warmup_days,
                             buy_threshold=th, sell_threshold=-th, exit_mode="plan",
-                            cost=cost, eval_start_date=eval_start, regime_series=regime_series)
+                            cost=cost, eval_start_date=eval_start, regime_series=regime_series,
+                            index_history=index_history, rs_params=rs_params)
 
     # in-sample 探索：閾値ごとに train 成績（期待値）で最良を選ぶ
     sweep, best = [], None
@@ -130,7 +136,8 @@ def evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=None, cost=Non
     bench = benchmark(histories, configs, buy_threshold=best_th, sell_threshold=-best_th,
                       initial_capital=initial_capital, warmup_days=warmup_days,
                       backtest_days=big, cost=cost, eval_start_date=split,
-                      regime_series=regime_series)
+                      regime_series=regime_series,
+                      index_history=index_history, rs_params=rs_params)
 
     in_expect = train_stat["expectancy"] or 0.0
     oos_expect = oos_stat["expectancy"] or 0.0

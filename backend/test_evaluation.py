@@ -109,3 +109,21 @@ def test_evaluate_holdout_accepts_regime_series():
                            initial_capital=3000.0, warmup_days=35)
     assert res["out_of_sample"]["sample"] == "out_of_sample"
     assert "benchmark" in res
+
+
+def test_benchmark_and_holdout_accept_rs_params():
+    from market import synthetic_history
+    import evaluation
+    hist = {f"E{i}.T": synthetic_history(f"E{i}.T", n=140, seed=i) for i in range(3)}
+    idx = synthetic_history("IDX.T", n=140, seed=55)
+    # benchmark: None と供給で all_signals_pct（score モード）は不変
+    b_base = evaluation.benchmark(hist, None, buy_threshold=2, sell_threshold=-2,
+                                  initial_capital=3000.0, warmup_days=35, backtest_days=80)
+    b_rs = evaluation.benchmark(hist, None, buy_threshold=2, sell_threshold=-2,
+                                initial_capital=3000.0, warmup_days=35, backtest_days=80,
+                                index_history=idx, rs_params={"period": 20, "scale": 0.10})
+    assert b_rs["all_signals_pct"] == b_base["all_signals_pct"]
+    # evaluate_holdout: 例外なく完走（out_of_sample を含む）
+    h = evaluation.evaluate_holdout(hist, None, initial_capital=3000.0, warmup_days=35,
+                                    index_history=idx, rs_params={"period": 20, "scale": 0.10})
+    assert "out_of_sample" in h
