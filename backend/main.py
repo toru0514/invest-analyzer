@@ -374,8 +374,8 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
         db.upsert_prices(ticker, df)
 
         ticker_cfgs = resolve_configs(common, [c for c in all_configs if c["ticker"] == ticker])
-        rs_strength = (relative_strength(df, idx_df, int(rs_params["period"]),
-                                         float(rs_params["scale"]), asof=df.index[-1])
+        rs_strength = (relative_strength(df, idx_df, int(rs_params.get("period", 20)),
+                                         float(rs_params.get("scale", 0.10)), asof=df.index[-1])
                        if rs_params is not None and idx_df is not None and not idx_df.empty else None)
         score, direction, detail = evaluate(df, ticker_cfgs, buy_th, sell_th,
                                             regime=regime, rs_strength=rs_strength)
