@@ -574,3 +574,9 @@ def test_evaluate_rs_affects_confidence_not_direction():
     none_eval = evaluate(df, _base_configs(), 1, -1, rs_strength=None)
     assert none_eval[2]["confidence"] == base[2]["confidence"]
     assert "rs" not in none_eval[2]
+
+
+def test_default_configs_has_relative_strength():
+    p = signals._find_cfg(signals.DEFAULT_CONFIGS, "relative_strength")
+    assert p is not None
+    assert p["period"] == 20 and p["scale"] == 0.10

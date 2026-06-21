@@ -43,6 +43,9 @@ DEFAULT_CONFIGS: list[dict[str, Any]] = [
     {"rule_type": "market_regime",
      "params": {"mode": "penalty", "penalty": 2, "sma": 13, "dd_lookback": 60, "dd_threshold": 0.10},
      "weight": 1, "enabled": 1},
+    # 相対力（打ち手7）: 指数対比の N 日超過リターンを確信度に加える。enabled:0 で RS 無効。
+    {"rule_type": "relative_strength",
+     "params": {"period": 20, "scale": 0.10}, "weight": 1, "enabled": 1},
     {"rule_type": "atr_exit", "params": {"length": 14, "stop_mult": 1.5, "target_mult": 1.5, "limit_method": "ma", "limit_ma": 5, "entry_atr_mult": 0.5, "support_n": 20}, "weight": 1, "enabled": 1},
     # price_target はスコアと独立した「即通知」経路。バックテストのスコアには算入しない。
     # {"rule_type": "price_target", "params": {"above": 1500}, "weight": 1, "enabled": 1},
