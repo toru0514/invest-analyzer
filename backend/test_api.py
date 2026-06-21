@@ -148,6 +148,18 @@ def test_refresh_signals_and_prices(client):
     assert len(candles) > 0 and {"open", "high", "low", "close"} <= candles[0].keys()
 
 
+def test_refresh_runs_with_relative_strength(client):
+    r = client.post("/refresh?demo=true")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["updated"]) == 4                 # RS 経路を通っても従来どおり完走
+    for row in body["updated"]:
+        assert row["direction"] in ("buy", "sell", "neutral")
+    # plan に量的 confidence が露出（RS が織り込まれた値・float か None）
+    plan = client.get("/plan").json()["rows"]
+    assert all(("confidence" in row) for row in plan)
+
+
 def test_unnotified_and_mark_notified(client):
     # price_target（下限）を入れて refresh → 必ず通知シグナルが出る状況を作る
     pt_id = client.post("/config", json={
