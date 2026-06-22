@@ -77,6 +77,7 @@ def fetch_earnings_dates(ticker: str, limit: int = 12) -> list[pd.Timestamp] | N
                                   threshold = EARNINGS_WARN_DAYS): { days: number } | null;
   ```
   `daysToEarnings == null || daysToEarnings < 0 || daysToEarnings > threshold` のとき `null`、それ以外 `{ days }`。純粋・テスト対象。
+  - **単位の注意**: ライブ警告の `EARNINGS_WARN_DAYS`（5）は**暦日**（`fetch_earnings_days` が暦日を返すため）。バックテストの `earnings_exit_days`（§6・**取引バー**基準）とは**わざと別単位**＝UI 文言で両者を混同しない。
 - `plan/page.tsx`: 各カードで `earningsWarning(row.days_to_earnings)` が非 null のとき **琥珀色バッジ「⚠ {days}日後に決算」**＋小さく助言「決算跨ぎ注意：保有なら前日までに手仕舞い検討」を表示。確信度/リスクバッジ（`plan/page.tsx:213` 付近）と同じ並びに置き、**direction を問わず**（buy/neutral/sell の全カード）描画する。
 
 ## 6. ③ バックテストの決算ギャップ反映＋跨ぎ回避（核心セマンティクス）
@@ -155,7 +156,7 @@ def fetch_earnings_dates(ticker: str, limit: int = 12) -> list[pd.Timestamp] | N
   - `earnings_map = {t: fetch_earnings_dates(t) for t in histories} if (ea and not payload.demo) else None`（**`earnings_aware` かつ非 demo のときだけ**ネット取得。demo・OFF は None＝現挙動）。
   - `run_backtest(..., earnings_map=earnings_map, earnings_exit_days=eed)`。
   - benchmark 呼び出し（`main.py:559`）は不変（score モード）。
-- `/optimize`（`main.py:583`）も同様に `earnings_map` を組み立て `evaluate_holdout(..., earnings_map=..., earnings_exit_days=eed)`。
+- `/optimize`（`main.py:583`）も**同じクランプ・demo ガード**で `earnings_map = {t: fetch_earnings_dates(t) for t in histories} if (ea and not payload.demo) else None` を組み立て、`evaluate_holdout(..., earnings_map=earnings_map, earnings_exit_days=eed)` を渡す（`/backtest` と対称）。
 - `market` の import（`main.py:24`）に `fetch_earnings_dates` を追加。
 - `perform_refresh`・`build_plan`・`upsert_plan` の**ライブ経路はギャップ/回避ロジックを呼ばない**（§5 の警告永続化のみ）。
 
