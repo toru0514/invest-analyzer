@@ -138,11 +138,9 @@ def get_conn():
 def _migrate_daily_plan(conn):
     """既存 data.db の daily_plan に後付けの追加列（AI解説・量的確信度）が無ければ追加（冪等）。"""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(daily_plan)").fetchall()}
-    for col, decl in (("vol_ratio", "REAL"), ("weekly_trend", "TEXT"),
-                      ("ai_summary", "TEXT"), ("ai_confidence", "INTEGER"),
+    for col, decl in (("ai_summary", "TEXT"), ("ai_confidence", "INTEGER"),
                       ("ai_risks", "TEXT"), ("confidence", "REAL"),
-                      ("shares", "REAL"), ("risk_amount", "REAL"),
-                      ("created_at", "TEXT")):
+                      ("shares", "REAL"), ("risk_amount", "REAL")):
         if col not in cols:
             conn.execute(f"ALTER TABLE daily_plan ADD COLUMN {col} {decl}")
 
@@ -415,8 +413,7 @@ def delete_holding(ticker: str):
 def upsert_plan(row: dict):
     """1銘柄分の作戦を (ticker, plan_date) で upsert。"""
     row = {**row}
-    for k in ("vol_ratio", "weekly_trend", "ai_summary", "ai_confidence", "ai_risks",
-              "confidence", "shares", "risk_amount"):
+    for k in ("ai_summary", "ai_confidence", "ai_risks", "confidence", "shares", "risk_amount"):
         row.setdefault(k, None)
     with get_conn() as conn:
         conn.execute(
