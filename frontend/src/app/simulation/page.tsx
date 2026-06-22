@@ -101,21 +101,21 @@ export default function Simulation() {
                   className="w-40 rounded border px-2 py-1"
                 />
               </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={earningsAware}
+                       onChange={(e) => setEarningsAware(e.target.checked)} />
+                決算を考慮（決算翌日の窓を再現）
+              </label>
+              {earningsAware && (
+                <label className="flex items-center gap-2 text-sm">
+                  決算の
+                  <input type="number" min={0} className="w-16 rounded border px-1"
+                         value={earningsExitDays}
+                         onChange={(e) => setEarningsExitDays(Number(e.target.value))} />
+                  営業日前に手仕舞い（0=持ち越し）
+                </label>
+              )}
             </>
-          )}
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={earningsAware}
-                   onChange={(e) => setEarningsAware(e.target.checked)} />
-            決算を考慮（決算翌日の窓を再現）
-          </label>
-          {earningsAware && (
-            <label className="flex items-center gap-2 text-sm">
-              決算の
-              <input type="number" min={0} className="w-16 rounded border px-1"
-                     value={earningsExitDays}
-                     onChange={(e) => setEarningsExitDays(Number(e.target.value))} />
-              営業日前に手仕舞い（0=持ち越し）
-            </label>
           )}
           <button
             onClick={run}
