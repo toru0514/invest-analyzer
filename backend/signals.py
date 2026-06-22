@@ -258,6 +258,8 @@ VOL_BOOST = 1.15       # 出来高サージ時の確信度ブースト
 VOL_DISCOUNT = 0.7     # 出来高細り時（direction 生存時）の確信度ディスカウント
 GATE_DISCOUNT = 0.6    # レジーム/週足ゲート penalty 時の確信度ディスカウント
 RS_STRENGTH_SCALE = 0.10   # 指数対比の超過リターンを tanh で正規化する係数（20日で+10%超過→s≈0.76）
+DEFAULT_RISK_PCT = 1.0   # 1トレード許容リスク（口座に対する%。1.0 = 1%）
+CONF_FLOOR = 0.5         # 確信度0で許容リスクを基準の何倍まで縮めるか（自信が低い時だけ縮小）
 
 # レジーム別グループ重み（打ち手5）。グループ純額(±GROUP_CAP)に乗じてから合算する。
 # トレンド時は順張り(trend)、レンジ時は逆張り(contrarian)を主役にする。
@@ -671,3 +673,29 @@ def build_plan(df: pd.DataFrame, direction: str, score: int,
         else:  # neutral
             out["rationale"] = f"保有者向けの出口参考（ATR{atr:.0f}）"
     return out
+
+
+def position_size(entry, stop, account, risk_pct, confidence=None) -> dict:
+    """リスクベースのサイジング（買い＝新規ロング用）。
+
+    株数 = (account × eff_risk_pct%) ÷ (entry − stop)。
+    confidence∈[0,100] を与えると許容リスクを CONF_FLOOR〜1.0 倍で微調整（基準は超えない）。
+    引数が None・非正、または risk_per_share ≤ 0 のときは全ゼロの安全な結果を返す（例外は投げない）。
+    戻り値: {shares, risk_amount, risk_per_share, position_value, effective_risk_pct}
+    """
+    zero = {"shares": 0.0, "risk_amount": 0.0, "risk_per_share": 0.0,
+            "position_value": 0.0, "effective_risk_pct": 0.0}
+    if entry is None or stop is None or account is None or risk_pct is None:
+        return zero
+    risk_per_share = float(entry) - float(stop)
+    if risk_per_share <= 0 or account <= 0 or risk_pct <= 0:
+        return zero
+    eff = float(risk_pct)
+    if confidence is not None:
+        c = max(0.0, min(100.0, float(confidence)))
+        eff = risk_pct * (CONF_FLOOR + (1.0 - CONF_FLOOR) * c / 100.0)
+    risk_amount = account * eff / 100.0
+    shares = risk_amount / risk_per_share
+    return {"shares": shares, "risk_amount": risk_amount,
+            "risk_per_share": risk_per_share, "position_value": shares * float(entry),
+            "effective_risk_pct": eff}

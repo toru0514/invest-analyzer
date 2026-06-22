@@ -580,3 +580,45 @@ def test_default_configs_has_relative_strength():
     p = signals._find_cfg(signals.DEFAULT_CONFIGS, "relative_strength")
     assert p is not None
     assert p["period"] == 20 and p["scale"] == 0.10
+
+
+def test_position_size_basic():
+    from signals import position_size
+    r = position_size(entry=1000.0, stop=950.0, account=1_000_000.0, risk_pct=1.0)
+    assert r["risk_per_share"] == 50.0
+    assert r["risk_amount"] == 10_000.0          # 口座100万 × 1%
+    assert r["shares"] == 200.0                   # 10000 / 50
+    assert r["position_value"] == 200_000.0       # 200 × 1000
+    assert r["effective_risk_pct"] == 1.0
+
+
+def test_position_size_confidence_scales_down_only():
+    from signals import position_size
+    base = position_size(1000.0, 950.0, 1_000_000.0, 1.0)["shares"]
+    c0 = position_size(1000.0, 950.0, 1_000_000.0, 1.0, confidence=0)
+    c50 = position_size(1000.0, 950.0, 1_000_000.0, 1.0, confidence=50)
+    c100 = position_size(1000.0, 950.0, 1_000_000.0, 1.0, confidence=100)
+    assert c0["shares"] == 100.0                  # eff=0.5% → 半分
+    assert c50["shares"] == 150.0                 # eff=0.75%
+    assert c100["shares"] == base == 200.0        # eff=1.0%（基準を超えない）
+
+
+def test_position_size_scales_with_stop_width():
+    from signals import position_size
+    wide = position_size(1000.0, 900.0, 1_000_000.0, 1.0)   # 損切幅100
+    narrow = position_size(1000.0, 975.0, 1_000_000.0, 1.0) # 損切幅25
+    assert wide["shares"] == 100.0                 # 広い→小さく
+    assert narrow["shares"] == 400.0               # 狭い→大きく
+
+
+def test_position_size_guards_return_zero():
+    from signals import position_size
+    for args in [
+        (1000.0, 1000.0, 1_000_000.0, 1.0),   # risk_per_share = 0
+        (1000.0, 1050.0, 1_000_000.0, 1.0),   # entry < stop（buy で異常）
+        (1000.0, 950.0, 0.0, 1.0),            # account 0
+        (1000.0, 950.0, 1_000_000.0, 0.0),    # risk_pct 0
+        (None, 950.0, 1_000_000.0, 1.0),      # None
+    ]:
+        r = position_size(*args)
+        assert r["shares"] == 0.0 and r["risk_amount"] == 0.0
