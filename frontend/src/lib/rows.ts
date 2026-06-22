@@ -62,6 +62,17 @@ export function selectTopN<T extends Rankable>(rows: T[], n: number): T[] {
   return n <= 0 ? [] : rankByConfidence(rows).filter((r) => (r.confidence ?? 0) > 0).slice(0, n);
 }
 
+// 作戦カードのサイジング表示（打ち手8）。shares が無い（旧行/非buy）なら null。
+export function riskSummary(
+  row: { shares: number | null; risk_amount: number | null; limit_price: number | null },
+  accountSize: number,
+): { shares: number; positionValue: number; riskAmount: number; riskPctOfAccount: number } | null {
+  if (row.shares == null || row.risk_amount == null) return null;
+  const positionValue = row.limit_price != null ? row.shares * row.limit_price : 0;
+  const riskPctOfAccount = accountSize > 0 ? (row.risk_amount / accountSize) * 100 : 0;
+  return { shares: row.shares, positionValue, riskAmount: row.risk_amount, riskPctOfAccount };
+}
+
 export function applyRefresh(rows: Row[], updated: RefreshRow[]): Row[] {
   const byTicker = new Map(updated.map((u) => [u.ticker, u]));
   return rows.map((r) => {

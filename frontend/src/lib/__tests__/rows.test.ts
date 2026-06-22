@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeRows, applyRefresh, selectTopN, Row } from "@/lib/rows";
+import { mergeRows, applyRefresh, selectTopN, riskSummary, Row } from "@/lib/rows";
 import { RefreshRow, Signal, WatchItem } from "@/lib/api";
 
 const watch: WatchItem[] = [
@@ -73,6 +73,19 @@ describe("selectTopN", () => {
       mk("E.T", "buy", 4, 0), //   0（方向はbuyだが連続確信度0＝落ちるナイフ）→ 除外
     ];
     expect(selectTopN(rows, 5).map((r) => r.ticker)).toEqual(["B.T"]);
+  });
+});
+
+describe("riskSummary", () => {
+  it("株数・投資額・口座%を整形する", () => {
+    const r = riskSummary({ shares: 200, risk_amount: 10000, limit_price: 1000 }, 1_000_000);
+    expect(r).not.toBeNull();
+    expect(r!.shares).toBe(200);
+    expect(r!.positionValue).toBe(200000);     // 200 × 1000
+    expect(r!.riskPctOfAccount).toBeCloseTo(1.0); // 10000 / 1,000,000
+  });
+  it("shares が無ければ null", () => {
+    expect(riskSummary({ shares: null, risk_amount: null, limit_price: 1000 }, 1_000_000)).toBeNull();
   });
 });
 

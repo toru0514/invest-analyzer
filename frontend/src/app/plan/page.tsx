@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, Holding, PlanRow, WatchItem } from "@/lib/api";
-import { selectTopN } from "@/lib/rows";
+import { riskSummary, selectTopN } from "@/lib/rows";
 import DirectionBadge from "@/components/DirectionBadge";
 import Disclaimer from "@/components/Disclaimer";
 import StockAddSearch from "@/components/StockAddSearch";
@@ -29,6 +29,7 @@ export default function PlanBoard() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [prices, setPrices] = useState<Record<string, { date: string; close: number }>>({});
   const [topN, setTopN] = useState(3);
+  const [accountSize, setAccountSize] = useState(1_000_000);
   const [demo, setDemo] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +47,7 @@ export default function PlanBoard() {
       setPrices(ps);
       setWatch(w);
       setTopN(settings.top_n);
+      setAccountSize(settings.account_size);
     } catch (e) {
       setError(String(e));
     }
@@ -155,6 +157,7 @@ export default function PlanBoard() {
                   holding={heldMap.get(pick.ticker) ?? null}
                   price={prices[pick.ticker]?.close ?? null}
                   onChanged={load}
+                  accountSize={accountSize}
                 />
               );
             })}
@@ -177,6 +180,7 @@ export default function PlanBoard() {
               holding={heldMap.get(w.ticker) ?? null}
               price={prices[w.ticker]?.close ?? null}
               onChanged={load}
+              accountSize={accountSize}
             />
           ))}
         </div>
@@ -188,10 +192,10 @@ export default function PlanBoard() {
 }
 
 function PlanCard({
-  ticker, name, row, holding, price, onChanged,
+  ticker, name, row, holding, price, onChanged, accountSize,
 }: {
   ticker: string; name?: string; row: PlanRow | null; holding: Holding | null;
-  price: number | null; onChanged: () => Promise<void>;
+  price: number | null; onChanged: () => Promise<void>; accountSize: number;
 }) {
   const actionable = row != null && row.direction !== "neutral";
   const pnl = holding && price != null ? (price - holding.avg_cost) * holding.shares : null;
@@ -231,6 +235,16 @@ function PlanCard({
             <PlanMetric label="利確目安" value={`${yen(row!.target_price)} 円`} sub={targetGain != null ? `保有なら ${signedYen(targetGain)}` : undefined} cls="text-green-700" />
             <PlanMetric label="損切ライン" value={`${yen(row!.stop_price)} 円`} sub={stopLoss != null ? `保有なら ${signedYen(stopLoss)}` : undefined} cls="text-red-700" />
           </div>
+          {(() => {
+            const s = riskSummary(row!, accountSize);
+            return s ? (
+              <p className="mt-2 text-xs text-slate-600">
+                推奨株数 <span className="font-semibold">{Math.round(s.shares).toLocaleString()}</span> 株
+                ／ 投資額 約 {Math.round(s.positionValue).toLocaleString()} 円
+                ／ 想定損失 {Math.round(s.riskAmount).toLocaleString()} 円（口座の {s.riskPctOfAccount.toFixed(1)}%）
+              </p>
+            ) : null;
+          })()}
           {row!.rationale && <p className="mt-2 text-xs text-slate-500">根拠: {row!.rationale}</p>}
         </>
       ) : holding && row && row.target_price != null ? (

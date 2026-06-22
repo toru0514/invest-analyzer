@@ -50,6 +50,8 @@ export type AppSettings = {
   scheduler_demo: boolean;
   scheduler_skip_holidays: boolean;
   top_n: number;
+  account_size: number;
+  risk_pct: number;
 };
 
 export type Candle = {
@@ -72,6 +74,8 @@ export type PlanRow = {
   limit_price: number | null;
   stop_price: number | null;
   target_price: number | null;
+  shares: number | null;
+  risk_amount: number | null;
   rationale: string | null;
   confidence: number | null;
   ai_summary: string | null;
