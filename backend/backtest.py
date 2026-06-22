@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 
 from costs import DEFAULT_COST, apply_costs, commission_cost
-from signals import BUY_THRESHOLD, DEFAULT_CONFIGS, SELL_THRESHOLD, build_plan, evaluate
+from signals import (BUY_THRESHOLD, DEFAULT_CONFIGS, DEFAULT_RISK_PCT, SELL_THRESHOLD,
+                     build_plan, evaluate, position_size)
 
 INITIAL_CAPITAL = 3000.0   # 仮想資金（円）
 BACKTEST_DAYS = 22         # 評価営業日数（≒1ヶ月）
@@ -40,7 +41,7 @@ def run_backtest(
     backtest_days=BACKTEST_DAYS, warmup_days=WARMUP_DAYS,
     buy_threshold=BUY_THRESHOLD, sell_threshold=SELL_THRESHOLD,
     exit_mode="score", cost=None, eval_start_date=None, regime_series=None,
-    index_history=None, rs_params=None,
+    index_history=None, rs_params=None, risk_pct=DEFAULT_RISK_PCT,
 ) -> dict:
     """exit_mode='score'（既定）はスコア反転で決済。'plan'（旧'atr'）は提示指値で約定する出口入り。
 
@@ -54,7 +55,8 @@ def run_backtest(
         return _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                                   warmup_days, buy_threshold, sell_threshold, cost,
                                   eval_start_date, regime_series,
-                                  index_history=index_history, rs_params=rs_params)
+                                  index_history=index_history, rs_params=rs_params,
+                                  risk_pct=risk_pct)
 
     n_tickers = len(histories)
     cash = initial_capital
@@ -148,7 +150,8 @@ def run_backtest(
 def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                        warmup_days, buy_threshold, sell_threshold, cost,
                        eval_start_date, regime_series=None,
-                       index_history=None, rs_params=None) -> dict:
+                       index_history=None, rs_params=None,
+                       risk_pct=DEFAULT_RISK_PCT) -> dict:
     """提示指値（build_plan）で約定し、ATR の損切/利確で決済する出口入りシミュレーション。
 
     検証=提示：作戦ボードと同一の limit_price/stop_price/target_price で約定検証する。
@@ -186,9 +189,17 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                     # 手数料: エントリーは投入現金(cash)、エグジットは総受取(proceeds)に対して控除
                     fill = apply_costs(pending["limit"], "buy", cost)
                     fee = commission_cost(cash, cost)
-                    shares = (cash - fee) / fill
+                    affordable = (cash - fee) / fill           # 従来の全力買い株数（上限）
+                    desired = position_size(pending["limit"], pending["stop"],
+                                            initial_capital, risk_pct,
+                                            confidence=pending.get("confidence"))["shares"]
+                    if desired and 0 < desired < affordable:
+                        shares = desired                        # リスクサイジング（バケット未満）
+                        cash -= shares * fill + commission_cost(shares * fill, cost)
+                    else:
+                        shares = affordable                     # キャップ＝従来の全力買い
+                        cash = 0.0
                     entry_price, stop, target, entry_i = fill, pending["stop"], pending["target"], i
-                    cash = 0.0
                     orders_filled += 1
                     trades.append({"date": d, "ticker": ticker, "action": "buy",
                                    "price": fill, "shares": shares})
@@ -214,9 +225,9 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
             # 3) 当日終値で判定（意思決定）。指標窓は全履歴 df.iloc[:i+1]。
             window = df.iloc[:i + 1]
             if len(window) >= warmup_days:
-                score, direction, _ = evaluate(window, configs, buy_threshold, sell_threshold,
-                                               regime=_regime_at(regime_series, df.index[i]),
-                                               rs_strength=_rs_at(index_history, rs_params, window, df.index[i]))
+                score, direction, detail = evaluate(window, configs, buy_threshold, sell_threshold,
+                                                    regime=_regime_at(regime_series, df.index[i]),
+                                                    rs_strength=_rs_at(index_history, rs_params, window, df.index[i]))
                 if shares > 0 and direction == "sell":
                     fill = apply_costs(close, "sell", cost)
                     proceeds = shares * fill
@@ -233,7 +244,8 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                         # 検証=提示：作戦ボードと同一の提示指値で待つ。
                         # 毎営業日の買いシグナルで指値を更新（前日の未約定指値は取消＝新規発注扱い）。
                         pending = {"limit": plan["limit_price"], "stop": plan["stop_price"],
-                                   "target": plan["target_price"], "expires": i + entry_expiry_days}
+                                   "target": plan["target_price"], "expires": i + entry_expiry_days,
+                                   "confidence": detail.get("confidence")}
                         orders_placed += 1
 
             if in_window:

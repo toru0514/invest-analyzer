@@ -160,16 +160,54 @@ def test_run_backtest_rs_supplied_runs_and_keeps_trades():
     assert rs["pnl_pct"] == base["pnl_pct"]
 
 
-def test_run_backtest_plan_rs_invariant():
+def test_run_backtest_plan_rs_structure_invariant():
+    """RS 供給で build_plan の指値は不変＝約定の件数と約定価格は不変。
+    ただし confidence（RS 依存）がサイジングに入るため pnl/株数は変わってよい（打ち手8）。"""
     from market import synthetic_history
     import backtest
     hist = {f"P{i}.T": synthetic_history(f"P{i}.T", n=120, seed=i) for i in range(2)}
     idx = synthetic_history("IDX.T", n=120, seed=77)
     base = backtest.run_backtest(hist, configs=None, exit_mode="plan", backtest_days=40,
-                                 buy_threshold=2, sell_threshold=-2)
+                                 buy_threshold=2, sell_threshold=-2, initial_capital=5_000_000)
     rs = backtest.run_backtest(hist, configs=None, exit_mode="plan", backtest_days=40,
-                               buy_threshold=2, sell_threshold=-2,
+                               buy_threshold=2, sell_threshold=-2, initial_capital=5_000_000,
                                index_history=idx, rs_params={"period": 20, "scale": 0.10})
-    # build_plan は confidence/rs を参照しない → 約定・PnL は不変（実戻り値キー）
     assert rs["closed_trades"] == base["closed_trades"]
-    assert rs["pnl_amount"] == base["pnl_amount"]
+    # 約定価格列（買い/売りの fill）は RS 非依存（選定 seed では RS が direction を反転させない前提）
+    base_prices = [round(t["price"], 6) for t in base["trades"]]
+    rs_prices = [round(t["price"], 6) for t in rs["trades"]]
+    assert base_prices == rs_prices
+
+
+def test_run_backtest_plan_risk_sizes_by_stop_width():
+    """大資本で risk_pct が大きいほど建玉（総買い株数）が増える＝リスクサイジングが効く。"""
+    import numpy as np, pandas as pd
+    import backtest
+    # 決定論的な上昇トレンド（buy を確実に出す。high/low にスプレッドを付与し ATR を確保）
+    closes = np.linspace(1000.0, 1400.0, 160)
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-01"), periods=len(closes))
+    up = pd.DataFrame({"open": closes, "high": closes + 10, "low": closes - 10,
+                       "close": closes, "volume": np.full(len(closes), 1e6)}, index=idx)
+    hist = {"UP.T": up}
+    kw = dict(configs=None, exit_mode="plan", backtest_days=120, buy_threshold=1,
+              sell_threshold=-1, initial_capital=50_000_000)   # キャップに張り付かない大資本
+    small = backtest.run_backtest(hist, risk_pct=0.2, **kw)
+    large = backtest.run_backtest(hist, risk_pct=2.0, **kw)
+    buys_small = sum(t["shares"] for t in small["trades"] if t["action"] == "buy")
+    buys_large = sum(t["shares"] for t in large["trades"] if t["action"] == "buy")
+    assert buys_large > 0, "buy が一度も約定していない＝テストが空虚"
+    assert buys_large > buys_small        # リスク許容が大きいほど株数が多い
+
+
+def test_run_backtest_plan_caps_at_bucket_cash():
+    """小資本では desired がバケットを超え、全力買い（投資額 ≤ バケット現金）に縮退する。"""
+    from market import synthetic_history
+    import backtest
+    hist = {"A.T": synthetic_history("A.T", n=120, seed=1),
+            "B.T": synthetic_history("B.T", n=120, seed=2)}
+    r = backtest.run_backtest(hist, configs=None, exit_mode="plan", backtest_days=40,
+                              buy_threshold=2, sell_threshold=-2, initial_capital=3000, risk_pct=1.0)
+    bucket = 3000 / 2
+    for t in r["trades"]:
+        if t["action"] == "buy":
+            assert t["shares"] * t["price"] <= bucket + 1e-6   # バケット現金を超えない
