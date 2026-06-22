@@ -201,7 +201,7 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
             #    注: 地合いレジームゲートは発注（意思決定）時に効くため、発注済みの pending は
             #        翌日以降に地合いが悪化しても約定し得る（既存の発注モデルに準拠・v1 の割り切り）。
             if in_window and shares == 0 and pending is not None and cash > 0:
-                if low <= pending["limit"]:
+                if low <= pending["limit"] and not in_blackout:
                     # 手数料: エントリーは投入現金(cash)、エグジットは総受取(proceeds)に対して控除
                     fill = apply_costs(pending["limit"], "buy", cost)
                     # 全力買い株数の上限。手数料を投入現金全体で見積もる保守的な天井

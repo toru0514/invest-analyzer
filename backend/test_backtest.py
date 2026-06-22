@@ -392,3 +392,38 @@ def test_plan_earnings_gap_fills_at_open(monkeypatch):
     assert off["gap_exit_count"] == 0
     assert len(sells_off) == 1 and round(sells_off[0]["price"], 6) == 95.0
     assert on["closed_pnls"][0] < off["closed_pnls"][0]   # 窓fillの方が損失が大きい（誠実）
+
+
+def test_plan_earnings_avoidance_exits_before_gap(monkeypatch):
+    """exit_days=1 は窓バーの前日に終値で手仕舞い（理由 earnings）し、窓に到達しない（gap=0）。"""
+    bt_mod, _ = _earnings_eval_plan(monkeypatch)
+    df = _earnings_df()
+    E = df.index[4]   # 窓バー i=5・ブラックアウト(N=1)=i=4
+    kw = dict(configs=DEFAULT_CONFIGS, exit_mode="plan", backtest_days=len(df),
+              warmup_days=1, initial_capital=1_000_000,
+              cost={"commission_bps": 0.0, "slippage_bps": 0.0})
+    r = bt_mod.run_backtest({"X.T": df}, earnings_map={"X.T": [E]}, earnings_exit_days=1, **kw)
+    assert r["earnings_exit_count"] == 1
+    assert r["gap_exit_count"] == 0                       # 窓に到達しない
+    sells = [t for t in r["trades"] if t["action"] == "sell"]
+    assert len(sells) == 1 and round(sells[0]["price"], 6) == 110.0   # i=4 終値で手仕舞い
+
+
+def test_plan_earnings_blackout_blocks_entry(monkeypatch):
+    """ブラックアウト中（決算直前）は提示指値に届いても新規約定しない。"""
+    import numpy as np, pandas as pd
+    bt_mod, _ = _earnings_eval_plan(monkeypatch)
+    # i=2 でのみ limit104 に届くが、E=index[2] で i=2 がブラックアウト(N=1, 窓=i=3)になる
+    opens  = [100, 100, 104, 130, 130, 130]
+    closes = [100, 100, 104, 130, 130, 130]
+    highs  = [100, 102, 106, 135, 135, 135]
+    lows   = [100,  99, 104, 120, 120, 120]
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-01"), periods=len(closes))
+    df = pd.DataFrame({"open": opens, "high": highs, "low": lows,
+                       "close": closes, "volume": np.full(len(closes), 1e6)}, index=idx)
+    kw = dict(configs=DEFAULT_CONFIGS, exit_mode="plan", backtest_days=len(df),
+              warmup_days=1, initial_capital=1_000_000,
+              cost={"commission_bps": 0.0, "slippage_bps": 0.0})
+    r = bt_mod.run_backtest({"X.T": df}, earnings_map={"X.T": [df.index[2]]},
+                            earnings_exit_days=1, **kw)
+    assert [t for t in r["trades"] if t["action"] == "buy"] == []   # 約定なし
