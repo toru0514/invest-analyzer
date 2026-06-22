@@ -139,6 +139,8 @@ export type BacktestResult = {
   signal_exit_count?: number;
   trail_exit_count?: number;
   time_exit_count?: number;
+  gap_exit_count?: number;
+  earnings_exit_count?: number;
   avg_holding_days?: number | null;
   risk_reward?: number | null;
   cost?: { commission_bps: number; slippage_bps: number };
@@ -197,7 +199,7 @@ export const api = {
     req<{ updated: RefreshRow[]; failed: string[]; note: string | null }>(
       `/refresh?demo=${demo}`, { method: "POST" }),
 
-  backtest: (body: { tickers?: string[]; initial_capital?: number; days?: number; demo?: boolean; persist?: boolean; exit_mode?: "score" | "plan"; period?: string; trail_atr_mult?: number; max_hold_days?: number }) =>
+  backtest: (body: { tickers?: string[]; initial_capital?: number; days?: number; demo?: boolean; persist?: boolean; exit_mode?: "score" | "plan"; period?: string; trail_atr_mult?: number; max_hold_days?: number; earnings_aware?: boolean; earnings_exit_days?: number }) =>
     req<BacktestResult>("/backtest", { method: "POST", body: JSON.stringify(body) }),
 
   getPlan: (date?: string) =>

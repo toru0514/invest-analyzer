@@ -6,6 +6,8 @@ export type BacktestForm = {
   atrExit: boolean;
   trailAtrMult: number;
   maxHoldDays: number;
+  earningsAware: boolean;
+  earningsExitDays: number;
 };
 
 export type BacktestBody = {
@@ -16,6 +18,8 @@ export type BacktestBody = {
   exit_mode: "score" | "plan";
   trail_atr_mult?: number;
   max_hold_days?: number;
+  earnings_aware?: boolean;
+  earnings_exit_days?: number;
 };
 
 /** フォーム状態から /backtest のリクエストボディを組み立てる純関数。
@@ -30,5 +34,7 @@ export function buildBacktestBody(f: BacktestForm): BacktestBody {
   };
   if (f.trailAtrMult > 0) body.trail_atr_mult = f.trailAtrMult;
   if (f.maxHoldDays > 0) body.max_hold_days = f.maxHoldDays;
+  if (f.earningsAware) body.earnings_aware = true;
+  if (f.earningsAware && f.earningsExitDays > 0) body.earnings_exit_days = f.earningsExitDays;
   return body;
 }
