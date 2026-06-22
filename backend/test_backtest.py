@@ -295,3 +295,29 @@ def test_plan_trailing_stop_is_lookahead_safe(monkeypatch):
     assert r["avg_holding_days"] == 3.0
     sells = [t for t in r["trades"] if t["action"] == "sell"]
     assert len(sells) == 1 and round(sells[0]["price"], 6) == 170.0
+
+
+def test_plan_time_exit_closes_stale_position(monkeypatch):
+    """stop/targetに当たらない横ばい建玉を max_hold_days で終値決済（理由 time）。"""
+    import backtest as bt_mod
+    import numpy as np, pandas as pd
+    flat = [100, 100, 100, 100, 100, 100, 100, 100]
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-01"), periods=len(flat))
+    df = pd.DataFrame({"open": flat, "high": [c + 1 for c in flat], "low": [c - 1 for c in flat],
+                       "close": flat, "volume": np.full(len(flat), 1e6)}, index=idx)
+    calls = {"n": 0}
+    def fake_eval(window, configs, bth, sth, regime=None, rs_strength=None):
+        calls["n"] += 1
+        return (3, "buy", {"confidence": None}) if calls["n"] == 1 else (0, "neutral", {})
+    def fake_plan(window, direction, score, configs=None):
+        return {"limit_price": 100.0, "stop_price": 50.0, "target_price": 999.0,
+                "atr": 10.0, "rationale": "x"}
+    monkeypatch.setattr(bt_mod, "evaluate", fake_eval)
+    monkeypatch.setattr(bt_mod, "build_plan", fake_plan)
+
+    r = bt_mod.run_backtest({"X.T": df}, configs=DEFAULT_CONFIGS, exit_mode="plan",
+                            backtest_days=len(flat), warmup_days=1, max_hold_days=3,
+                            initial_capital=1_000_000,
+                            cost={"commission_bps": 0.0, "slippage_bps": 0.0})
+    assert r["time_exit_count"] >= 1
+    assert r["avg_holding_days"] == 3.0    # 保有上限ちょうどで決済（i-entry_i==3）

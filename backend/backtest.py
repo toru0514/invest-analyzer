@@ -230,7 +230,9 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                     exit_raw, reason = target, "target"
                 else:
                     exit_raw, reason = None, None
-                # （Task 3 でここに time-exit を追加）
+                # 3) 時間切れ（終値）: 日中の価格トリガが無く保有が上限到達
+                if exit_raw is None and max_hold_days > 0 and (i - entry_i) >= max_hold_days:
+                    exit_raw, reason = close, "time"
                 if exit_raw is not None:
                     fill = apply_costs(exit_raw, "sell", cost)
                     proceeds = shares * fill
