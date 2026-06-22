@@ -704,3 +704,33 @@ def position_size(entry, stop, account, risk_pct, confidence=None) -> dict:
     return {"shares": shares, "risk_amount": risk_amount,
             "risk_per_share": risk_per_share, "position_value": shares * entry,
             "effective_risk_pct": eff}
+
+
+def trailing_stop(initial_stop, extreme, atr, mult, direction="buy") -> float:
+    """トレーリングストップ価格を返す純関数。
+
+    ロング(direction="buy"): max(initial_stop, extreme − mult·atr)（下限を上にのみ引き上げ）。
+    ショート(direction="sell"): min(initial_stop, extreme + mult·atr)（上限を下にのみ引き下げ）。
+    extreme は建玉開始以降の最有利値（ロング=最高値・ショート=最安値）。
+
+    mult≤0 / atr≤0 / extreme が nan / 各引数 None・非数 のときは initial_stop をそのまま返す
+    （トレーリング無効・例外は投げない契約。position_size と同じ堅牢方針）。
+    方向対応は build_plan(buy/sell) との対称性と将来のショート側バックテスト用。現 plan-mode
+    バックテストはロング経路のみ使用する（ショート経路は単体テストで固定）。
+    """
+    if initial_stop is None:
+        return None
+    try:
+        s0 = float(initial_stop)
+    except (TypeError, ValueError):
+        return initial_stop
+    try:
+        ext, a, m = float(extreme), float(atr), float(mult)
+    except (TypeError, ValueError):
+        return s0
+    # atr/mult 非正・extreme nan を弾く（nan 比較は False なので not(...)/ext==ext で拾う）
+    if not (a > 0 and m > 0 and ext == ext):
+        return s0
+    if direction == "sell":
+        return min(s0, ext + m * a)
+    return max(s0, ext - m * a)

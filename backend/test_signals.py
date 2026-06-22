@@ -633,3 +633,33 @@ def test_position_size_handles_numeric_strings_and_nan():
     nan = float("nan")
     assert position_size(nan, 950.0, 1_000_000.0, 1.0)["shares"] == 0.0
     assert position_size(1000.0, nan, 1_000_000.0, 1.0)["shares"] == 0.0
+
+
+def test_trailing_stop_long_ratchets_up_only():
+    from signals import trailing_stop
+    # 高値追随で下限を上げる（mult=3, atr=20 → 距離60）
+    assert trailing_stop(900.0, 1000.0, 20.0, 3.0) == 940.0    # max(900, 1000-60)
+    assert trailing_stop(900.0, 950.0, 20.0, 3.0) == 900.0     # max(900, 890)=900（下げない）
+    assert trailing_stop(900.0, 1100.0, 20.0, 3.0) == 1040.0   # さらに高値更新で上昇
+
+
+def test_trailing_stop_short_ratchets_down_only():
+    from signals import trailing_stop
+    assert trailing_stop(1100.0, 1000.0, 20.0, 3.0, "sell") == 1060.0   # min(1100, 1060)
+    assert trailing_stop(1100.0, 1080.0, 20.0, 3.0, "sell") == 1100.0   # min(1100, 1140)=1100
+
+
+def test_trailing_stop_disabled_returns_initial():
+    from signals import trailing_stop
+    assert trailing_stop(900.0, 1000.0, 20.0, 0.0) == 900.0    # mult 0 → OFF
+    assert trailing_stop(900.0, 1000.0, 0.0, 3.0) == 900.0     # atr 0 → OFF
+    assert trailing_stop(900.0, None, 20.0, 3.0) == 900.0      # extreme None → OFF
+    assert trailing_stop(900.0, 1000.0, None, 3.0) == 900.0    # atr None → OFF
+
+
+def test_trailing_stop_robust_strings_and_nan():
+    from signals import trailing_stop
+    nan = float("nan")
+    assert trailing_stop("900.0", "1000.0", "20.0", "3.0") == 940.0   # 数値文字列でも計算
+    assert trailing_stop(900.0, nan, 20.0, 3.0) == 900.0              # extreme nan → OFF
+    assert trailing_stop(900.0, 1000.0, nan, 3.0) == 900.0            # atr nan → OFF
