@@ -135,3 +135,12 @@ def test_evaluate_holdout_accepts_risk_pct():
     hist = {f"P{i}.T": synthetic_history(f"P{i}.T", n=200, seed=i) for i in range(2)}
     res = evaluate_holdout(hist, configs=None, initial_capital=5_000_000, risk_pct=0.5)
     assert "chosen_params" in res and "out_of_sample" in res
+
+
+def test_evaluate_holdout_accepts_exit_params():
+    """evaluate_holdout が trail/time を受領して完走する（挙動差は backtest 層で担保）。"""
+    from market import synthetic_history
+    from evaluation import evaluate_holdout
+    hist = {f"T{i}.T": synthetic_history(f"T{i}.T", n=160, seed=i) for i in range(2)}
+    res = evaluate_holdout(hist, None, trail_atr_mult=3.0, max_hold_days=10)
+    assert "out_of_sample" in res and "chosen_params" in res
