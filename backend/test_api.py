@@ -396,3 +396,20 @@ def test_perform_refresh_sizes_buy_end_to_end(client, monkeypatch):
         for w in wl:
             if w["ticker"] == "UPTREND.T":
                 client.delete(f"/watchlist/{w['id']}")
+
+
+def test_backtest_accepts_exit_params(client):
+    r = client.post("/backtest", json={"demo": True, "days": 40, "exit_mode": "plan",
+                                       "trail_atr_mult": 3.0, "max_hold_days": 10})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["exit_mode"] == "plan"
+    assert "trail_exit_count" in body and "time_exit_count" in body
+
+
+def test_backtest_default_has_no_trail_or_time_exits(client):
+    r = client.post("/backtest", json={"demo": True, "days": 40, "exit_mode": "plan"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("trail_exit_count", 0) == 0
+    assert body.get("time_exit_count", 0) == 0

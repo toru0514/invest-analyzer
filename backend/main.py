@@ -114,6 +114,8 @@ class BacktestIn(BaseModel):
     exit_mode: str = "plan"      # 既定を plan（検証=提示）に
     persist: bool = False
     period: str = "3y"
+    trail_atr_mult: float = 0.0  # >0 でトレーリング（plan モード）。0=OFF
+    max_hold_days: int = 0       # >0 で時間切れ手仕舞い。0=OFF
 
 
 # ---------------------------------------------------------------------------
@@ -545,10 +547,13 @@ def backtest(payload: BacktestIn):
     # days 未指定なら取得期間全体（warmup以降）を評価する
     bdays = payload.days if payload.days is not None else max(
         (len(df) for df in histories.values()), default=0) + 1
+    trail = max(0.0, float(payload.trail_atr_mult or 0.0))   # 負値・不正は OFF へ
+    mhd = max(0, int(payload.max_hold_days or 0))
     result = run_backtest(histories, configs=common, initial_capital=payload.initial_capital,
                           backtest_days=bdays, buy_threshold=buy_th, sell_threshold=sell_th,
                           exit_mode=payload.exit_mode, cost=cost, regime_series=rs,
-                          index_history=idx_df, rs_params=rs_params, risk_pct=_risk_pct())
+                          index_history=idx_df, rs_params=rs_params, risk_pct=_risk_pct(),
+                          trail_atr_mult=trail, max_hold_days=mhd)
     result["failed"] = failed
     result["significance"] = summary_stats(result["closed_pnls"])
     result["benchmark"] = benchmark(histories, common, buy_threshold=buy_th, sell_threshold=sell_th,
@@ -571,6 +576,8 @@ class OptimizeIn(BaseModel):
     initial_capital: float = 3000.0
     period: str = "3y"
     split_ratio: float = 0.7
+    trail_atr_mult: float = 0.0
+    max_hold_days: int = 0
 
 
 @app.post("/optimize")
@@ -589,9 +596,12 @@ def optimize(payload: OptimizeIn):
     cost = cost_from_configs(common)
     rs, idx_df = _fetch_regime_series(payload.period, payload.demo, common)
     rs_params = _find_cfg(common, "relative_strength")
+    trail = max(0.0, float(payload.trail_atr_mult or 0.0))
+    mhd = max(0, int(payload.max_hold_days or 0))
     res = evaluate_holdout(histories, common, split_ratio=payload.split_ratio, cost=cost,
                            initial_capital=payload.initial_capital, regime_series=rs,
-                           index_history=idx_df, rs_params=rs_params, risk_pct=_risk_pct())
+                           index_history=idx_df, rs_params=rs_params, risk_pct=_risk_pct(),
+                           trail_atr_mult=trail, max_hold_days=mhd)
     res["failed"] = failed
     res["tickers"] = list(histories.keys())
     return res
