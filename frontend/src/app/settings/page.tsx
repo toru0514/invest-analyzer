@@ -283,6 +283,28 @@ export default function Settings() {
               />
             </label>
           </div>
+          <div className="mt-3 flex flex-wrap items-end gap-4 text-sm">
+            <label className="flex flex-col gap-1">
+              口座資金（円・サイジング基準）
+              <input
+                type="number"
+                value={settings.account_size}
+                onChange={(e) => setSettings({ ...settings, account_size: Number(e.target.value) })}
+                className="w-36 rounded border px-2 py-1"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              1トレード許容リスク（％）
+              <input
+                type="number"
+                step={0.1}
+                value={settings.risk_pct}
+                onChange={(e) => setSettings({ ...settings, risk_pct: Number(e.target.value) })}
+                className="w-28 rounded border px-2 py-1"
+              />
+            </label>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">損切り到達時の損失が口座資金の許容リスク%以内になるよう株数を決めます（確信度で微調整）。</p>
           <div className="mt-4 flex flex-wrap items-end gap-4 border-t pt-4 text-sm">
             <label className="flex items-center gap-2">
               <input
