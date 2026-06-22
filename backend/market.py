@@ -89,3 +89,25 @@ def fetch_earnings_days(ticker: str) -> int | None:
         return int((future.min().normalize() - now.normalize()).days)
     except Exception:
         return None
+
+
+def fetch_earnings_dates(ticker: str, limit: int = 12) -> list[pd.Timestamp] | None:
+    """過去＋将来の決算日（tz-naive・midnight・昇順）。取得不可・無しは None（best-effort）。
+
+    yfinance の決算日 index は tz-aware（取引所TZ）なことが多い。tz を落として
+    日付化し、バックテストの df.index（tz-naive・get_history 由来）と素直に比較できるようにする。
+    例外・空は None（fetch_earnings_days と同じ堅牢契約・例外は投げない）。
+    """
+    try:
+        import yfinance as yf
+
+        df = yf.Ticker(ticker).get_earnings_dates(limit=limit)
+        if df is None or df.empty:
+            return None
+        idx = pd.to_datetime(df.index)
+        if idx.tz is not None:
+            idx = idx.tz_localize(None)
+        dates = sorted({ts.normalize() for ts in idx})
+        return dates or None
+    except Exception:
+        return None
