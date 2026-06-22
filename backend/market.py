@@ -107,7 +107,8 @@ def fetch_earnings_dates(ticker: str, limit: int = 12) -> list[pd.Timestamp] | N
         idx = pd.to_datetime(df.index)
         if idx.tz is not None:
             idx = idx.tz_localize(None)
-        dates = sorted({ts.normalize() for ts in idx})
+        idx = idx.dropna().normalize()   # NaT 行（将来決算で日付未確定など）を落とし、確定分は残す
+        dates = sorted(set(idx))
         return dates or None
     except Exception:
         return None
