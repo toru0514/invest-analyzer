@@ -622,3 +622,14 @@ def test_position_size_guards_return_zero():
     ]:
         r = position_size(*args)
         assert r["shares"] == 0.0 and r["risk_amount"] == 0.0
+
+
+def test_position_size_handles_numeric_strings_and_nan():
+    from signals import position_size
+    # 数値文字列でも例外を投げず計算できる（DB の get_all_meta は文字列を返すため防御）
+    r = position_size("1000.0", "950.0", "1000000", "1.0")
+    assert r["shares"] == 200.0
+    # nan 入力は全ゼロの安全な結果（例外も nan 伝播もしない）
+    nan = float("nan")
+    assert position_size(nan, 950.0, 1_000_000.0, 1.0)["shares"] == 0.0
+    assert position_size(1000.0, nan, 1_000_000.0, 1.0)["shares"] == 0.0
