@@ -188,16 +188,20 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                 if low <= pending["limit"]:
                     # 手数料: エントリーは投入現金(cash)、エグジットは総受取(proceeds)に対して控除
                     fill = apply_costs(pending["limit"], "buy", cost)
+                    # 全力買い株数の上限。手数料を投入現金全体で見積もる保守的な天井
+                    # （手数料率>0 のとき真の上限よりわずかに低いが買い過ぎない。既定は commission_bps=0 で誤差0）。
                     fee = commission_cost(cash, cost)
-                    affordable = (cash - fee) / fill           # 従来の全力買い株数（上限）
+                    affordable = (cash - fee) / fill
                     desired = position_size(pending["limit"], pending["stop"],
                                             initial_capital, risk_pct,
                                             confidence=pending.get("confidence"))["shares"]
-                    if desired and 0 < desired < affordable:
+                    if 0 < desired < affordable:
                         shares = desired                        # リスクサイジング（バケット未満）
                         cash -= shares * fill + commission_cost(shares * fill, cost)
                     else:
-                        shares = affordable                     # キャップ＝従来の全力買い
+                        # キャップ＝従来の全力買い。desired<=0（limit<=stop の異常プラン＝build_plan は
+                        # 通常 limit>stop を保証）もここに落ち、全力買いにフォールバックする（v1 の割り切り）。
+                        shares = affordable
                         cash = 0.0
                     entry_price, stop, target, entry_i = fill, pending["stop"], pending["target"], i
                     orders_filled += 1
