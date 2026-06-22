@@ -167,7 +167,7 @@ def _safe_pos_float(raw, default: float, max_value: float | None = None) -> floa
 
 
 def _risk_pct() -> float:
-    """設定値 risk_pct（%）を返す。未設定・不正値は 1.0 にフォールバック。"""
+    """設定値 risk_pct（%）を返す。未設定・不正値・範囲外（≤0 / >100）は 1.0 にフォールバック。"""
     return _safe_pos_float(db.get_all_meta().get("risk_pct", "1.0"), 1.0, max_value=100.0)
 
 
