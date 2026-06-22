@@ -343,3 +343,51 @@ def test_plan_has_risk_sizing_for_buy(client):
             assert isinstance(r["risk_amount"], (int, float)) and r["risk_amount"] >= 0
         else:
             assert r["shares"] is None and r["risk_amount"] is None
+
+
+def test_perform_refresh_sizes_buy_end_to_end(client, monkeypatch):
+    """buy 経路を実際に通す統合テスト: 上昇トレンドを get_history に流し、
+    perform_refresh が position_size と同じ推奨株数を daily_plan に永続化することを確認する。
+    （既存の null 経路テストと対で buy/非buy 両分岐をカバー）"""
+    import numpy as np
+    import pandas as pd
+    import main
+    from signals import position_size
+    # 決定論的な上昇トレンド OHLC（test_signals の _idx 流儀）→ buy を出す
+    # high/low に固定スプレッドを付与してATRを確保する（high==low==close だと
+    # ATR≈step_size≈2.52 になり stop_price が limit_price を上回り shares=0 になる）
+    # 末尾を today にすることで _next_business_day が他テストと同じ plan_date を生成し、
+    # latest_plan_date() が返す日付に UPTREND.T 行が含まれる（過去日付だと埋もれる）
+    closes = np.linspace(1000.0, 1300.0, 120)
+    spread = 10.0  # 固定スプレッドで完全決定論的
+    idx = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=len(closes))
+    up = pd.DataFrame({"open": closes - spread * 0.3,
+                       "high": closes + spread,
+                       "low":  closes - spread,
+                       "close": closes,
+                       "volume": np.full(len(closes), 1e6)}, index=idx)
+    monkeypatch.setattr(main, "get_history", lambda *a, **k: up.copy())
+
+    client.post("/watchlist", json={"ticker": "UPTREND.T", "name": "上昇"})
+    # 既定閾値2では score=1 で neutral になるため、買い閾値を1に下げる（test_signals と同方針）
+    client.put("/settings", json={"buy_threshold": 1, "sell_threshold": -1})
+    try:
+        client.post("/refresh?demo=true")
+        rows = client.get("/plan").json()["rows"]
+        row = [r for r in rows if r["ticker"] == "UPTREND.T"][0]
+        assert row["direction"] == "buy"
+        assert isinstance(row["shares"], (int, float)) and row["shares"] > 0
+        assert isinstance(row["risk_amount"], (int, float)) and row["risk_amount"] > 0
+        # perform_refresh が position_size と同じ株数を永続化していること
+        # （account_size 既定100万・risk_pct 既定1.0・永続化された confidence を使用）
+        expected = position_size(row["limit_price"], row["stop_price"],
+                                 1_000_000.0, 1.0, confidence=row["confidence"])
+        assert abs(row["shares"] - expected["shares"]) < 1e-6
+        assert abs(row["risk_amount"] - expected["risk_amount"]) < 1e-6
+    finally:
+        # 後始末: 閾値を既定に戻し、テスト銘柄を削除（共有DBを汚さない）
+        client.put("/settings", json={"buy_threshold": 2, "sell_threshold": -2})
+        wl = client.get("/watchlist").json()
+        for w in wl:
+            if w["ticker"] == "UPTREND.T":
+                client.delete(f"/watchlist/{w['id']}")
