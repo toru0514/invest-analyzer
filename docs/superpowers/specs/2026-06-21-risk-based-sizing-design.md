@@ -139,6 +139,8 @@ risk_pct      -- 既定 "1.0"（1トレード許容リスク% = 口座の1.0%）
 - `risk_pct` 貫通: `run_backtest(exit_mode="plan", risk_pct=...)` が `_run_backtest_plan` に渡る。`evaluate_holdout` 経路で plan 戦略に貫通する（`benchmark` は score モード固定のため配線しない）。
 - **観測可能性**: リスクサイジングの効果（高ボラ＝損切り幅が広い銘柄の建玉が縮む）を観測するテストは、**バケットキャップに張り付かない資本設定**で行う。既定の `INITIAL_CAPITAL=3000` は小さく、entry≈数百〜千円の合成データでは `desired` がほぼ常に `bucket/fill` を超えて全力買いに縮退するため差が出ない。サイジングのスケール（損切り幅で株数が変わる）を検証するテストは `initial_capital` を十分大きく（例: 数百万〜）設定し `shares × fill < bucket` の領域で確認する。キャップ縮退の挙動は別途、小資本で確認する。
 - **既存テストの更新（重要・破壊的）**: `test_run_backtest_plan_rs_invariant`（test_backtest.py:163-175）は「plan モードは RS 供給で pnl 不変」を主張するが、本打ち手で **confidence（RS 依存）がサイジングに入る**ため `pnl_amount` の不変は**設計上崩れる**。このテストの意図（build_plan の指値が RS 非依存）は `closed_trades`＝約定構造の不変と約定**価格**の不変で表現し直し、`pnl_amount` の等価アサートは削除/置換する（pnl はサイジング経由で変わるのが正しい）。その他、plan モードの pnl/株数を固定している既存アサートも新サイジングに合わせて更新（red→green の一部）。score モード・benchmark のテストは不変であることを確認。
+  - 実装注記: 表現し直したテストは「約定価格・約定タイミング・件数（`closed_trades` の長さ）は不変／`trades[].shares`・`pnl` は変わってよい」を明示する。`closed` 要素（pnl を含む dict）の `==` 等価比較に戻さないこと。
+  - 実装注記: キャップ縮退/観測テストの資本値は `synthetic_history` の価格レンジに依存する。テスト作成時に実際の合成価格で `bucket/fill` 境界を一度数値確認し、観測テスト（差が出る）と縮退テスト（キャップ）の資本を選定する。
 
 ### 6.5 フロント（`npm --prefix frontend test`）
 - `AppSettings` 型に `account_size`/`risk_pct`、`PlanRow` 型に `shares`/`risk_amount` を追加。
