@@ -81,12 +81,16 @@ list_plan (SELECT *) → /plan → PlanRow（shares, risk_amount 追加） → P
 
 [Surface 2: バックテスト]
 _run_backtest_plan(..., risk_pct=DEFAULT_RISK_PCT):
-  発注判定時に evaluate の detail["confidence"] を取得し pending に確信度を保持
-  約定時: desired = position_size(limit, stop, initial_capital, risk_pct, confidence)["shares"]
+  発注判定時（指値を出す日）に evaluate の detail["confidence"] を取得し pending に保持する。
+    → サイジングに使う confidence は「発注日」のもの＝作戦ボードがその銘柄に出すのと同じ確信度で固定。
+      （pending は毎営業日の買いシグナルで更新される既存挙動なので、常に直近発注日の確信度になる。）
+  約定時: desired = position_size(limit, stop, initial_capital, risk_pct, confidence=pending.confidence)["shares"]
           shares  = min(desired, (cash - fee) / fill)        # バケット現金でキャップ
 run_backtest(..., risk_pct=) → exit_mode in (plan, atr) のとき _run_backtest_plan へ素通し
 main.py /backtest・/optimize: risk_pct を app_meta から読み run_backtest/evaluate_holdout へ供給
-evaluation.evaluate_holdout / benchmark: plan 戦略の risk_pct を貫通（benchmark の buy&hold/全シグナルは等分のまま）
+evaluation.evaluate_holdout: plan 戦略の risk_pct を貫通（内部の _bt → run_backtest plan モードへ）
+evaluation.benchmark: 配線**不要**（唯一の run_backtest 呼び出しが score モード固定＝リスクサイジング対象外。
+  benchmark の buy&hold/全シグナルは意図的に等分のまま。risk_pct を足してもデッドコードになる）
 ```
 
 ### モジュール配置
@@ -124,7 +128,7 @@ risk_pct      -- 既定 "1.0"（1トレード許容リスク% = 口座の1.0%）
 ### 6.2 作戦ボード（`test_api.py`）
 - `perform_refresh`（demo）後、buy プラン行に `shares`・`risk_amount` が数値で入る。sell/neutral 行は `shares=None`。
 - `/settings` GET に `account_size`・`risk_pct` が既定値で含まれる。PUT で更新→GET で反映。範囲外（負・0・>100）は既定へフォールバック。
-- 設定件数アサート（`test_api.py` に設定キー数の検査があれば更新）。
+- 設定アサートは `account_size`/`risk_pct` の個別検査を足す形で十分（`test_api.py` の `/settings` テストにキー数の網羅アサートは無く、個別キー検査のみのため、キー数検査の更新は不要）。
 
 ### 6.3 マイグレーション（`test_api.py` か db テスト）
 - `shares`/`risk_amount` 列が無い旧 `daily_plan` を持つ DB を開いても `_migrate_daily_plan` で冪等に追加され、既存行は両列 NULL のまま読める。
@@ -132,8 +136,9 @@ risk_pct      -- 既定 "1.0"（1トレード許容リスク% = 口座の1.0%）
 ### 6.4 バックテスト（`test_backtest.py`）
 - `_run_backtest_plan` がリスクサイジングで約定する（同一データで等分時と株数が変わる＝損切り幅に応じてスケール）。
 - バケット現金キャップ: 損切り幅が極端に狭い銘柄でリスク目標がバケットを超える場合、`shares × fill ≤ バケット現金`（旧挙動に縮退）。
-- `risk_pct` 貫通: `run_backtest(exit_mode="plan", risk_pct=...)` が `_run_backtest_plan` に渡る。`evaluate_holdout`/`benchmark` 経路で plan 戦略に貫通し benchmark は等分のまま。
-- **既存テストの更新**: plan モードの pnl/株数を固定している既存アサートは新サイジングに合わせて更新（red→green の一部）。score モード・benchmark のテストは不変であることを確認。
+- `risk_pct` 貫通: `run_backtest(exit_mode="plan", risk_pct=...)` が `_run_backtest_plan` に渡る。`evaluate_holdout` 経路で plan 戦略に貫通する（`benchmark` は score モード固定のため配線しない）。
+- **観測可能性**: リスクサイジングの効果（高ボラ＝損切り幅が広い銘柄の建玉が縮む）を観測するテストは、**バケットキャップに張り付かない資本設定**で行う。既定の `INITIAL_CAPITAL=3000` は小さく、entry≈数百〜千円の合成データでは `desired` がほぼ常に `bucket/fill` を超えて全力買いに縮退するため差が出ない。サイジングのスケール（損切り幅で株数が変わる）を検証するテストは `initial_capital` を十分大きく（例: 数百万〜）設定し `shares × fill < bucket` の領域で確認する。キャップ縮退の挙動は別途、小資本で確認する。
+- **既存テストの更新（重要・破壊的）**: `test_run_backtest_plan_rs_invariant`（test_backtest.py:163-175）は「plan モードは RS 供給で pnl 不変」を主張するが、本打ち手で **confidence（RS 依存）がサイジングに入る**ため `pnl_amount` の不変は**設計上崩れる**。このテストの意図（build_plan の指値が RS 非依存）は `closed_trades`＝約定構造の不変と約定**価格**の不変で表現し直し、`pnl_amount` の等価アサートは削除/置換する（pnl はサイジング経由で変わるのが正しい）。その他、plan モードの pnl/株数を固定している既存アサートも新サイジングに合わせて更新（red→green の一部）。score モード・benchmark のテストは不変であることを確認。
 
 ### 6.5 フロント（`npm --prefix frontend test`）
 - `AppSettings` 型に `account_size`/`risk_pct`、`PlanRow` 型に `shares`/`risk_amount` を追加。
