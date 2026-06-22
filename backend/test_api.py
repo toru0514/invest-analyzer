@@ -427,6 +427,30 @@ def test_perform_refresh_sizes_buy_end_to_end(client, monkeypatch):
                 client.delete(f"/watchlist/{w['id']}")
 
 
+def test_perform_refresh_persists_days_to_earnings(client, monkeypatch):
+    """非 demo 経路で perform_refresh が fetch_earnings_days の結果を daily_plan に永続化する。"""
+    import numpy as np
+    import pandas as pd
+    import main
+    closes = np.linspace(1000.0, 1300.0, 120)
+    idx = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=len(closes))
+    up = pd.DataFrame({"open": closes - 3.0, "high": closes + 10.0, "low": closes - 10.0,
+                       "close": closes, "volume": np.full(len(closes), 1e6)}, index=idx)
+    monkeypatch.setattr(main, "get_history", lambda *a, **k: up.copy())
+    monkeypatch.setattr(main, "fetch_earnings_days", lambda t: 3)
+
+    client.post("/watchlist", json={"ticker": "EARN.T", "name": "決算銘柄"})
+    try:
+        client.post("/refresh")   # demo=False → fetch_earnings_days 経路を通す
+        rows = client.get("/plan").json()["rows"]
+        row = [r for r in rows if r["ticker"] == "EARN.T"][0]
+        assert row["days_to_earnings"] == 3
+    finally:
+        for w in client.get("/watchlist").json():
+            if w["ticker"] == "EARN.T":
+                client.delete(f"/watchlist/{w['id']}")
+
+
 def test_backtest_accepts_exit_params(client):
     r = client.post("/backtest", json={"demo": True, "days": 40, "exit_mode": "plan",
                                        "trail_atr_mult": 3.0, "max_hold_days": 10})
