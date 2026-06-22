@@ -124,6 +124,20 @@ def test_settings_get_and_update(client):
     assert client.get("/settings").json()["top_n"] == 3
     client.put("/settings", json={"top_n": 3})             # 後始末
 
+    # 打ち手8: account_size / risk_pct（既定 100万 / 1.0%）
+    assert s["account_size"] == 1_000_000.0
+    assert s["risk_pct"] == 1.0
+    client.put("/settings", json={"account_size": 2_000_000, "risk_pct": 0.5})
+    s3 = client.get("/settings").json()
+    assert s3["account_size"] == 2_000_000.0 and s3["risk_pct"] == 0.5
+    client.put("/settings", json={"risk_pct": 0})       # 範囲外（0）→既定へ
+    assert client.get("/settings").json()["risk_pct"] == 1.0
+    client.put("/settings", json={"risk_pct": 150})     # 範囲外（>100）→既定へ
+    assert client.get("/settings").json()["risk_pct"] == 1.0
+    client.put("/settings", json={"account_size": -5})  # 範囲外（負）→既定へ
+    assert client.get("/settings").json()["account_size"] == 1_000_000.0
+    client.put("/settings", json={"account_size": 1_000_000, "risk_pct": 1.0})  # 後始末
+
     # 既定に戻す（他テストへ影響しないように）
     client.put("/settings", json={"buy_threshold": 2, "scheduler_enabled": False})
 

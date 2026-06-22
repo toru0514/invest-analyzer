@@ -140,6 +140,8 @@ class SettingsUpdate(BaseModel):
     scheduler_demo: Optional[bool] = None
     scheduler_skip_holidays: Optional[bool] = None
     top_n: Optional[int] = None
+    account_size: Optional[float] = None
+    risk_pct: Optional[float] = None
 
 
 def _safe_top_n(raw) -> int:
@@ -150,6 +152,17 @@ def _safe_top_n(raw) -> int:
         return v if v >= 0 else 3
     except (TypeError, ValueError):
         return 3
+
+
+def _safe_pos_float(raw, default: float, max_value: float | None = None) -> float:
+    """正の float。範囲外（非正・上限超・非数）は default にフォールバック（_safe_top_n と同方針）。"""
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return default
+    if v <= 0 or (max_value is not None and v > max_value):
+        return default
+    return v
 
 
 @app.get("/settings")
@@ -163,6 +176,8 @@ def get_settings():
         "scheduler_demo": m.get("scheduler_demo", "0") == "1",
         "scheduler_skip_holidays": m.get("scheduler_skip_holidays", "1") == "1",
         "top_n": _safe_top_n(m.get("top_n", "3")),
+        "account_size": _safe_pos_float(m.get("account_size", "1000000"), 1_000_000.0),
+        "risk_pct": _safe_pos_float(m.get("risk_pct", "1.0"), 1.0, max_value=100.0),
     }
 
 
@@ -182,6 +197,10 @@ def put_settings(payload: SettingsUpdate):
         db.set_meta("scheduler_skip_holidays", "1" if payload.scheduler_skip_holidays else "0")
     if payload.top_n is not None:
         db.set_meta("top_n", str(payload.top_n) if payload.top_n >= 0 else "3")
+    if payload.account_size is not None:
+        db.set_meta("account_size", str(_safe_pos_float(payload.account_size, 1_000_000.0)))
+    if payload.risk_pct is not None:
+        db.set_meta("risk_pct", str(_safe_pos_float(payload.risk_pct, 1.0, max_value=100.0)))
     return get_settings()
 
 
