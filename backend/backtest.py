@@ -43,6 +43,7 @@ def run_backtest(
     exit_mode="score", cost=None, eval_start_date=None, regime_series=None,
     index_history=None, rs_params=None, risk_pct=DEFAULT_RISK_PCT,
     trail_atr_mult=0.0, max_hold_days=0,
+    earnings_map=None, earnings_exit_days=0,
 ) -> dict:
     """exit_mode='score'（既定）はスコア反転で決済。'plan'（旧'atr'）は提示指値で約定する出口入り。
 
@@ -58,7 +59,8 @@ def run_backtest(
                                   eval_start_date, regime_series,
                                   index_history=index_history, rs_params=rs_params,
                                   risk_pct=risk_pct,
-                                  trail_atr_mult=trail_atr_mult, max_hold_days=max_hold_days)
+                                  trail_atr_mult=trail_atr_mult, max_hold_days=max_hold_days,
+                                  earnings_map=earnings_map, earnings_exit_days=earnings_exit_days)
 
     n_tickers = len(histories)
     cash = initial_capital
@@ -154,7 +156,8 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                        eval_start_date, regime_series=None,
                        index_history=None, rs_params=None,
                        risk_pct=DEFAULT_RISK_PCT,
-                       trail_atr_mult=0.0, max_hold_days=0) -> dict:
+                       trail_atr_mult=0.0, max_hold_days=0,
+                       earnings_map=None, earnings_exit_days=0) -> dict:
     """提示指値（build_plan）で約定し、ATR の損切/利確で決済する出口入りシミュレーション。
 
     検証=提示：作戦ボードと同一の limit_price/stop_price/target_price で約定検証する。
@@ -171,6 +174,10 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
 
     for ticker, df in histories.items():
         df = df.sort_index()
+        # 決算翌日の窓バー位置（E より厳密に後の最初のバー）。earnings_map 無し→空＝OFF。
+        edates = (earnings_map or {}).get(ticker) or []
+        gaps_all = sorted({int(df.index.searchsorted(e, side="right")) for e in edates})
+        gaps_in = {g for g in gaps_all if g < len(df)}
         cash = initial_capital / max(len(histories), 1)
         shares = 0.0
         entry_price = stop = target = None
@@ -183,8 +190,12 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
         for i in range(start, len(df)):
             row = df.iloc[i]
             d = str(pd.Timestamp(df.index[i]).date())
-            low, high, close = float(row["low"]), float(row["high"]), float(row["close"])
+            open_, low, high, close = (float(row["open"]), float(row["low"]),
+                                       float(row["high"]), float(row["close"]))
             in_window = eval_start_date is None or df.index[i] >= eval_start_date
+            is_gap_bar = i in gaps_in
+            in_blackout = earnings_exit_days > 0 and any(i < g <= i + earnings_exit_days
+                                                         for g in gaps_all)
 
             # 1) 提示指値の約定（有効期限内に安値が指値に達したら約定・コスト適用）
             #    注: 地合いレジームゲートは発注（意思決定）時に効くため、発注済みの pending は
@@ -221,16 +232,21 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
             # 2) 保有中（エントリー当日を除く）：トレーリング/損切/利確
             if shares > 0 and entry_i is not None and i > entry_i:
                 trailing = trail_atr_mult > 0 and entry_atr is not None
-                # トレーリングstopは high_water（前バーまで）で算出。当日高値は当日stopに効かせない。
                 cur_stop = trailing_stop(stop, high_water, entry_atr, trail_atr_mult, "buy") \
                     if trailing else stop
                 if low <= cur_stop:
-                    exit_raw, reason = cur_stop, ("trail" if trailing else "stop")
-                elif not trailing and high >= target:   # 固定targetはトレーリングOFF時のみ
+                    if is_gap_bar and open_ < cur_stop:
+                        exit_raw, reason = open_, "gap"     # 決算翌日の窓を寄りで約定
+                    else:
+                        exit_raw, reason = cur_stop, ("trail" if trailing else "stop")
+                elif not trailing and high >= target:
                     exit_raw, reason = target, "target"
                 else:
                     exit_raw, reason = None, None
-                # 3) 時間切れ（終値）: 日中の価格トリガが無く保有が上限到達
+                # 決算跨ぎ回避（終値）: 日中トリガが無くブラックアウト内
+                if exit_raw is None and in_blackout:
+                    exit_raw, reason = close, "earnings"
+                # 時間切れ（終値）
                 if exit_raw is None and max_hold_days > 0 and (i - entry_i) >= max_hold_days:
                     exit_raw, reason = close, "time"
                 if exit_raw is not None:
@@ -245,7 +261,6 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                     shares = 0.0; entry_price = stop = target = None
                     entry_i = None; entry_atr = None; high_water = None
                 elif trailing:
-                    # 未決済なら当日高値で high_water 更新（cur_stop 算出の後＝look-ahead回避）
                     high_water = max(high_water, high)
 
             # 3) 当日終値で判定（意思決定）。指標窓は全履歴 df.iloc[:i+1]。
@@ -316,5 +331,7 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
         "signal_exit_count": sum(1 for c in closed if c["reason"] == "signal"),
         "trail_exit_count": sum(1 for c in closed if c["reason"] == "trail"),
         "time_exit_count": sum(1 for c in closed if c["reason"] == "time"),
+        "gap_exit_count": sum(1 for c in closed if c["reason"] == "gap"),
+        "earnings_exit_count": sum(1 for c in closed if c["reason"] == "earnings"),
         "avg_holding_days": avg_holding, "risk_reward": risk_reward,
     }

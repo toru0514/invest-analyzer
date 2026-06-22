@@ -321,3 +321,74 @@ def test_plan_time_exit_closes_stale_position(monkeypatch):
                             cost={"commission_bps": 0.0, "slippage_bps": 0.0})
     assert r["time_exit_count"] >= 1
     assert r["avg_holding_days"] == 3.0    # 保有上限ちょうどで決済（i-entry_i==3）
+
+
+def _earnings_df():
+    """i=2 で約定し、i=5 が決算翌日の窓バー（寄り70で stop95 を窓抜け）になる統制OHLC。"""
+    import numpy as np, pandas as pd
+    opens  = [100, 100, 104, 110, 110,  70,  72,  72]
+    closes = [100, 100, 104, 110, 110,  72,  72,  72]
+    highs  = [100, 102, 106, 112, 112,  75,  74,  74]
+    lows   = [100,  99, 104, 106, 106,  65,  70,  70]
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-01"), periods=len(closes))
+    return pd.DataFrame({"open": opens, "high": highs, "low": lows,
+                         "close": closes, "volume": np.full(len(closes), 1e6)}, index=idx)
+
+
+def _earnings_eval_plan(monkeypatch):
+    """最初だけ buy・以降 neutral／固定プラン（limit104・stop95・target999）。
+
+    戻り値 (bt_mod, calls)。同じ monkeypatch で run_backtest を複数回呼ぶときは、
+    呼び出し間で calls["n"] = 0 にリセットして「最初だけ buy」を再現する
+    （既存 test_plan_trailing_exit_locks_profit と同型）。
+    """
+    import backtest as bt_mod
+    calls = {"n": 0}
+    def fake_eval(window, configs, bth, sth, regime=None, rs_strength=None):
+        calls["n"] += 1
+        return (3, "buy", {"confidence": None}) if calls["n"] == 1 else (0, "neutral", {})
+    def fake_plan(window, direction, score, configs=None):
+        return {"limit_price": 104.0, "stop_price": 95.0, "target_price": 999.0,
+                "atr": 10.0, "rationale": "x"}
+    monkeypatch.setattr(bt_mod, "evaluate", fake_eval)
+    monkeypatch.setattr(bt_mod, "build_plan", fake_plan)
+    return bt_mod, calls
+
+
+def test_plan_earnings_default_off_is_unchanged():
+    """earnings_map=None（既定）は現挙動を完全再現（約定価格・closed_pnls・新count=0）。"""
+    from market import synthetic_history
+    import backtest
+    hist = {f"T{i}.T": synthetic_history(f"T{i}.T", n=120, seed=i) for i in range(3)}
+    kw = dict(configs=None, exit_mode="plan", backtest_days=40, buy_threshold=2,
+              sell_threshold=-2, initial_capital=5_000_000)
+    base = backtest.run_backtest(hist, **kw)
+    explicit = backtest.run_backtest(hist, earnings_map=None, earnings_exit_days=0, **kw)
+    assert base["closed_pnls"] == explicit["closed_pnls"]
+    assert [round(t["price"], 6) for t in base["trades"]] == \
+           [round(t["price"], 6) for t in explicit["trades"]]
+    assert explicit["gap_exit_count"] == 0 and explicit["earnings_exit_count"] == 0
+
+
+def test_plan_earnings_gap_fills_at_open(monkeypatch):
+    """earnings_aware（earnings_map 供給・exit_days=0）の持ち越しは、決算翌日の窓を寄りfillで再現する。"""
+    bt_mod, calls = _earnings_eval_plan(monkeypatch)
+    df = _earnings_df()
+    E = df.index[4]   # searchsorted(side=right) → 窓バー i=5
+    kw = dict(configs=DEFAULT_CONFIGS, exit_mode="plan", backtest_days=len(df),
+              warmup_days=1, initial_capital=1_000_000,
+              cost={"commission_bps": 0.0, "slippage_bps": 0.0})
+
+    on = bt_mod.run_backtest({"X.T": df}, earnings_map={"X.T": [E]}, earnings_exit_days=0, **kw)
+    sells_on = [t for t in on["trades"] if t["action"] == "sell"]
+    assert on["gap_exit_count"] == 1
+    assert len(sells_on) == 1 and round(sells_on[0]["price"], 6) == 70.0   # 寄り70（stop95 ではない）
+
+    # 比較: earnings OFF だと同じ i=5 で stop ぴったり95 約定＝持ち越しコストを過小評価。
+    # 同じ monkeypatch を再利用するので「最初だけ buy」を再現するためカウンタをリセットする。
+    calls["n"] = 0
+    off = bt_mod.run_backtest({"X.T": df}, earnings_map=None, earnings_exit_days=0, **kw)
+    sells_off = [t for t in off["trades"] if t["action"] == "sell"]
+    assert off["gap_exit_count"] == 0
+    assert len(sells_off) == 1 and round(sells_off[0]["price"], 6) == 95.0
+    assert on["closed_pnls"][0] < off["closed_pnls"][0]   # 窓fillの方が損失が大きい（誠実）
