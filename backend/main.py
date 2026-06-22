@@ -21,7 +21,7 @@ from ai_commentary import generate_commentary
 from backtest import run_backtest
 from costs import cost_from_configs
 from evaluation import benchmark, evaluate_holdout, summary_stats
-from market import fetch_earnings_days, fetch_name, get_history
+from market import fetch_earnings_dates, fetch_earnings_days, fetch_name, get_history
 from scheduler import DailyScheduler
 from signals import (
     _find_cfg,
@@ -116,6 +116,8 @@ class BacktestIn(BaseModel):
     period: str = "3y"
     trail_atr_mult: float = 0.0  # >0 でトレーリング（plan モード）。0=OFF
     max_hold_days: int = 0       # >0 で時間切れ手仕舞い。0=OFF
+    earnings_aware: bool = False   # True で決算翌日の窓を再現（earnings_map を取得）
+    earnings_exit_days: int = 0     # >0 で決算 N 営業日前に手仕舞い（跨ぎ回避）。0=持ち越し
 
 
 # ---------------------------------------------------------------------------
@@ -550,11 +552,15 @@ def backtest(payload: BacktestIn):
         (len(df) for df in histories.values()), default=0) + 1
     trail = max(0.0, float(payload.trail_atr_mult or 0.0))   # 負値・不正は OFF へ
     mhd = max(0, int(payload.max_hold_days or 0))
+    eed = max(0, int(payload.earnings_exit_days or 0))
+    earnings_map = ({t: fetch_earnings_dates(t) for t in histories}
+                    if (payload.earnings_aware and not payload.demo) else None)
     result = run_backtest(histories, configs=common, initial_capital=payload.initial_capital,
                           backtest_days=bdays, buy_threshold=buy_th, sell_threshold=sell_th,
                           exit_mode=payload.exit_mode, cost=cost, regime_series=rs,
                           index_history=idx_df, rs_params=rs_params, risk_pct=_risk_pct(),
-                          trail_atr_mult=trail, max_hold_days=mhd)
+                          trail_atr_mult=trail, max_hold_days=mhd,
+                          earnings_map=earnings_map, earnings_exit_days=eed)
     result["failed"] = failed
     result["significance"] = summary_stats(result["closed_pnls"])
     result["benchmark"] = benchmark(histories, common, buy_threshold=buy_th, sell_threshold=sell_th,
@@ -579,6 +585,8 @@ class OptimizeIn(BaseModel):
     split_ratio: float = 0.7
     trail_atr_mult: float = 0.0
     max_hold_days: int = 0
+    earnings_aware: bool = False   # True で決算翌日の窓を再現（earnings_map を取得）
+    earnings_exit_days: int = 0     # >0 で決算 N 営業日前に手仕舞い（跨ぎ回避）。0=持ち越し
 
 
 @app.post("/optimize")
@@ -599,10 +607,14 @@ def optimize(payload: OptimizeIn):
     rs_params = _find_cfg(common, "relative_strength")
     trail = max(0.0, float(payload.trail_atr_mult or 0.0))
     mhd = max(0, int(payload.max_hold_days or 0))
+    eed = max(0, int(payload.earnings_exit_days or 0))
+    earnings_map = ({t: fetch_earnings_dates(t) for t in histories}
+                    if (payload.earnings_aware and not payload.demo) else None)
     res = evaluate_holdout(histories, common, split_ratio=payload.split_ratio, cost=cost,
                            initial_capital=payload.initial_capital, regime_series=rs,
                            index_history=idx_df, rs_params=rs_params, risk_pct=_risk_pct(),
-                           trail_atr_mult=trail, max_hold_days=mhd)
+                           trail_atr_mult=trail, max_hold_days=mhd,
+                           earnings_map=earnings_map, earnings_exit_days=eed)
     res["failed"] = failed
     res["tickers"] = list(histories.keys())
     return res

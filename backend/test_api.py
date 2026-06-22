@@ -466,3 +466,18 @@ def test_backtest_default_has_no_trail_or_time_exits(client):
     body = r.json()
     assert body.get("trail_exit_count", 0) == 0
     assert body.get("time_exit_count", 0) == 0
+
+
+def test_backtest_accepts_earnings_params(client):
+    r = client.post("/backtest", json={"demo": True, "days": 40, "exit_mode": "plan",
+                                       "earnings_aware": True, "earnings_exit_days": 1})
+    assert r.status_code == 200
+    body = r.json()
+    assert "gap_exit_count" in body and "earnings_exit_count" in body
+
+
+def test_optimize_accepts_earnings_params(client):
+    r = client.post("/optimize", json={"demo": True, "earnings_aware": True,
+                                       "earnings_exit_days": 1})
+    assert r.status_code == 200
+    assert "out_of_sample" in r.json()
