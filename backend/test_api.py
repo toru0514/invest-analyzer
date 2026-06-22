@@ -330,3 +330,16 @@ def test_daily_plan_sizing_columns_and_upsert(tmp_path, monkeypatch):
                        "confidence": 70.0, "shares": 200.0, "risk_amount": 10000.0})
     new = [r for r in dbmod.list_plan("2026-06-01") if r["ticker"] == "NEW.T"][0]
     assert new["shares"] == 200.0 and new["risk_amount"] == 10000.0
+
+
+def test_plan_has_risk_sizing_for_buy(client):
+    client.post("/watchlist", json={"ticker": "7203.T", "name": "トヨタ"})
+    client.post("/refresh?demo=true")
+    rows = client.get("/plan").json()["rows"]
+    assert rows, "プラン行が無い"
+    for r in rows:
+        if r["direction"] == "buy" and r["limit_price"] and r["stop_price"]:
+            assert isinstance(r["shares"], (int, float)) and r["shares"] >= 0
+            assert isinstance(r["risk_amount"], (int, float)) and r["risk_amount"] >= 0
+        else:
+            assert r["shares"] is None and r["risk_amount"] is None

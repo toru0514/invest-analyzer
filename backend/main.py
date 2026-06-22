@@ -28,6 +28,7 @@ from signals import (
     build_plan,
     evaluate,
     market_regime,
+    position_size,
     regime_series,
     relative_strength,
     resolve_configs,
@@ -365,6 +366,9 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
     watch = db.list_watchlist(only_enabled=True)
     all_configs = db.list_configs(active_only=True)
     buy_th, sell_th = db.get_thresholds()
+    settings = db.get_all_meta()
+    account_size = _safe_pos_float(settings.get("account_size", "1000000"), 1_000_000.0)
+    risk_pct = _safe_pos_float(settings.get("risk_pct", "1.0"), 1.0, max_value=100.0)
     # ticker 別 + 全銘柄共通(NULL) の設定を組み合わせる
     common = [c for c in all_configs if c["ticker"] is None]
     rs_params = _find_cfg(common, "relative_strength")   # None なら RS 無効
@@ -413,6 +417,14 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
         plan = build_plan(df, direction, score, ticker_cfgs)
         plan_date = _next_business_day(date)
 
+        # リスクサイジング（打ち手8）: buy かつ指値・逆指値が揃った行のみ計算
+        if direction == "buy" and plan["limit_price"] and plan["stop_price"]:
+            sz = position_size(plan["limit_price"], plan["stop_price"],
+                               account_size, risk_pct, confidence=detail.get("confidence"))
+            plan_shares, plan_risk = sz["shares"], sz["risk_amount"]
+        else:
+            plan_shares = plan_risk = None
+
         # AI解説（Gemini・無料枠・best-effort）。キー無し/失敗は None で従来どおり。
         days_to_earnings = None if demo else fetch_earnings_days(ticker)
         commentary = generate_commentary(
@@ -431,6 +443,7 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
             "limit_price": plan["limit_price"], "stop_price": plan["stop_price"],
             "target_price": plan["target_price"], "rationale": plan["rationale"],
             "confidence": detail.get("confidence"),
+            "shares": plan_shares, "risk_amount": plan_risk,
             "ai_summary": commentary["summary"] if commentary else None,
             "ai_confidence": commentary["confidence"] if commentary else None,
             "ai_risks": json.dumps(commentary["risks"], ensure_ascii=False) if commentary else None,
