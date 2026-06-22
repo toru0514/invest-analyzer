@@ -62,13 +62,15 @@ export function selectTopN<T extends Rankable>(rows: T[], n: number): T[] {
   return n <= 0 ? [] : rankByConfidence(rows).filter((r) => (r.confidence ?? 0) > 0).slice(0, n);
 }
 
-// 作戦カードのサイジング表示（打ち手8）。shares が無い（旧行/非buy）なら null。
+// 作戦カードのサイジング表示（打ち手8）。サイジングが無い（旧行/非buy）か entry 価格が無いなら null。
+// 不変条件: perform_refresh は limit_price 真値の buy のみ shares/risk_amount を入れる
+//（shares 非null ⟹ limit_price 非null）。limit_price も null 条件に含め、投資額0円の誤表示を防ぐ。
 export function riskSummary(
   row: { shares: number | null; risk_amount: number | null; limit_price: number | null },
   accountSize: number,
 ): { shares: number; positionValue: number; riskAmount: number; riskPctOfAccount: number } | null {
-  if (row.shares == null || row.risk_amount == null) return null;
-  const positionValue = row.limit_price != null ? row.shares * row.limit_price : 0;
+  if (row.shares == null || row.risk_amount == null || row.limit_price == null) return null;
+  const positionValue = row.shares * row.limit_price;
   const riskPctOfAccount = accountSize > 0 ? (row.risk_amount / accountSize) * 100 : 0;
   return { shares: row.shares, positionValue, riskAmount: row.risk_amount, riskPctOfAccount };
 }

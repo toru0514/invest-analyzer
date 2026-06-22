@@ -77,15 +77,19 @@ describe("selectTopN", () => {
 });
 
 describe("riskSummary", () => {
-  it("株数・投資額・口座%を整形する", () => {
+  it("株数・投資額・口座比率を計算する", () => {
     const r = riskSummary({ shares: 200, risk_amount: 10000, limit_price: 1000 }, 1_000_000);
     expect(r).not.toBeNull();
     expect(r!.shares).toBe(200);
+    expect(r!.riskAmount).toBe(10000);
     expect(r!.positionValue).toBe(200000);     // 200 × 1000
     expect(r!.riskPctOfAccount).toBeCloseTo(1.0); // 10000 / 1,000,000
   });
   it("shares が無ければ null", () => {
     expect(riskSummary({ shares: null, risk_amount: null, limit_price: 1000 }, 1_000_000)).toBeNull();
+  });
+  it("limit_price が無ければ null（投資額0円の誤表示を防ぐ）", () => {
+    expect(riskSummary({ shares: 200, risk_amount: 10000, limit_price: null }, 1_000_000)).toBeNull();
   });
 });
 
