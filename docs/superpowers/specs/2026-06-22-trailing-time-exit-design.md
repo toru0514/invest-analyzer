@@ -56,7 +56,7 @@
 - バー `i` の `current_stop` は **`high_water`（`i−1` まで）** で算出し、**そのバーで未決済なら最後に `high_water = max(high_water, high_i)` で更新**する。当日高値が当日 stop に効かない（look-ahead 回避）。既存の「エントリー当日は決済しない（`i>entry_i`）」と整合。
 
 **エッジ**
-- pending が立つのは `build_plan` が limit/stop/target を返したときのみで、その場合 `plan["atr"]` は非 None（`build_plan` は atr None なら全 None 返し）。よって `entry_atr` は有効値。万一 `entry_atr` が無効でも `trailing_stop` は `initial_stop` を返し（§5）、トレーリングは無効化されるが target も無効化されたままになるため、**`trail_atr_mult>0` でも `entry_atr` 無効なら固定 stop＋固定 target にフォールバック**（trailing を実質 OFF 扱い）する条件で実装する。
+- pending が立つのは `build_plan` が limit/stop/target を返したときのみで、その場合 `plan["atr"]` は非 None（`build_plan` は atr None なら全 None 返し。`atr_value` も nan→None を返す）。よって**保有中の `entry_atr` は常に有効な正の float** で、`entry_atr` が無効になる実経路は存在しない（＝特別なフォールバックは実装しない）。仮に `entry_atr` が無効でも `trailing_stop` は `initial_stop` を返す（§5）ため安全側に倒れる（トレーリング実質 OFF・このとき固定 target も無効のままなので、建玉は初期 stop と時間切れ/signal でのみ決済される）。
 - gap 貫通（寄りで stop を飛び越える）は**モデルしない**＝従来どおり stop/target/trail 価格ぴったりで約定（gap は課題7の領分）。
 
 ## 5. 純関数 `signals.trailing_stop`
