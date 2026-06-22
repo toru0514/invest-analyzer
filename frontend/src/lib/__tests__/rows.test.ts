@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeRows, applyRefresh, selectTopN, riskSummary, Row } from "@/lib/rows";
+import { mergeRows, applyRefresh, selectTopN, riskSummary, earningsWarning, Row } from "@/lib/rows";
 import { RefreshRow, Signal, WatchItem } from "@/lib/api";
 
 const watch: WatchItem[] = [
@@ -106,5 +106,20 @@ describe("applyRefresh", () => {
     const out = applyRefresh(base, updated);
     expect(out[0]).toMatchObject({ price: 3260, score: 2, direction: "buy", volRatio: 1.5, weeklyTrend: "up" });
     expect(out[1]).toBe(base[1]); // 未更新は同一参照
+  });
+});
+
+describe("earningsWarning", () => {
+  it("しきい値以内は { days } を返す", () => {
+    expect(earningsWarning(3)).toEqual({ days: 3 });
+    expect(earningsWarning(0)).toEqual({ days: 0 });
+    expect(earningsWarning(5)).toEqual({ days: 5 });       // 既定しきい値=5（境界含む）
+    expect(earningsWarning(7, 7)).toEqual({ days: 7 });    // しきい値は引数で変更可（境界含む）
+  });
+  it("null・負・しきい値超は null", () => {
+    expect(earningsWarning(null)).toBeNull();
+    expect(earningsWarning(-1)).toBeNull();
+    expect(earningsWarning(6)).toBeNull();
+    expect(earningsWarning(8, 7)).toBeNull();              // しきい値超は引数変更後も null
   });
 });

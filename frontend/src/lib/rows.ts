@@ -85,3 +85,18 @@ export function applyRefresh(rows: Row[], updated: RefreshRow[]): Row[] {
     return { ...r, price: u.price, score: u.score, direction: u.direction, date: u.date, volRatio: vr, weeklyTrend: wt };
   });
 }
+
+/** 決算警告のしきい値（暦日）。fetch_earnings_days が暦日を返すため暦日基準。
+ *  ※ バックテストの earnings_exit_days（取引バー基準）とは別単位。 */
+export const EARNINGS_WARN_DAYS = 5;
+
+/** 決算までの日数がしきい値以内なら { days } を返す純関数（それ以外 null）。 */
+export function earningsWarning(
+  daysToEarnings: number | null,
+  threshold = EARNINGS_WARN_DAYS,
+): { days: number } | null {
+  if (daysToEarnings == null || daysToEarnings < 0 || daysToEarnings > threshold) {
+    return null;
+  }
+  return { days: daysToEarnings };
+}

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, Holding, PlanRow, WatchItem } from "@/lib/api";
-import { riskSummary, selectTopN } from "@/lib/rows";
+import { earningsWarning, riskSummary, selectTopN } from "@/lib/rows";
 import DirectionBadge from "@/components/DirectionBadge";
 import Disclaimer from "@/components/Disclaimer";
 import StockAddSearch from "@/components/StockAddSearch";
@@ -215,6 +215,15 @@ function PlanCard({
             確信度 {Math.round(row.confidence)}
           </span>
         )}
+        {row && (() => {
+          const w = earningsWarning(row.days_to_earnings);
+          return w ? (
+            <span className="rounded bg-amber-500 px-1.5 py-0.5 text-xs font-semibold text-white"
+                  title="決算跨ぎ注意：保有なら前日までに手仕舞い検討">
+              ⚠ {w.days}日後に決算
+            </span>
+          ) : null;
+        })()}
         {row?.vol_ratio != null && <span className="text-sm text-slate-500">出来高 {row.vol_ratio.toFixed(2)}倍</span>}
         {row?.weekly_trend && (
           <span className={`text-sm ${TREND_CLASS[row.weekly_trend] ?? ""}`}>

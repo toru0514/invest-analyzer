@@ -78,6 +78,7 @@ export type PlanRow = {
   risk_amount: number | null;
   rationale: string | null;
   confidence: number | null;
+  days_to_earnings: number | null;
   ai_summary: string | null;
   ai_confidence: number | null;
   ai_risks: string | null; // JSON文字列化された string[]
