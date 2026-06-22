@@ -332,6 +332,35 @@ def test_daily_plan_sizing_columns_and_upsert(tmp_path, monkeypatch):
     assert new["shares"] == 200.0 and new["risk_amount"] == 10000.0
 
 
+def test_daily_plan_earnings_column_migration(tmp_path, monkeypatch):
+    """既存 daily_plan に days_to_earnings が無くても冪等マイグレーションで追加され、upsert で値が入る。"""
+    import sqlite3
+    import db as dbmod
+    dbfile = tmp_path / "old_earn.db"
+    conn = sqlite3.connect(dbfile)
+    # days_to_earnings の無い旧スキーマ（打ち手8 相当）
+    conn.execute(
+        "CREATE TABLE daily_plan (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "ticker TEXT NOT NULL, plan_date TEXT NOT NULL, direction TEXT, score INTEGER, "
+        "vol_ratio REAL, weekly_trend TEXT, limit_price REAL, stop_price REAL, "
+        "target_price REAL, rationale TEXT, confidence REAL, shares REAL, risk_amount REAL, "
+        "ai_summary TEXT, ai_confidence INTEGER, ai_risks TEXT, created_at TEXT, "
+        "UNIQUE(ticker, plan_date))")
+    conn.commit(); conn.close()
+
+    monkeypatch.setattr(dbmod, "DB_PATH", str(dbfile))
+    dbmod.init_db()
+    with dbmod.get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(daily_plan)")}
+    assert "days_to_earnings" in cols
+    dbmod.upsert_plan({"ticker": "E.T", "plan_date": "2026-06-01", "direction": "buy",
+                       "score": 3, "vol_ratio": None, "weekly_trend": None,
+                       "limit_price": 1000.0, "stop_price": 950.0, "target_price": 1100.0,
+                       "rationale": "x", "days_to_earnings": 3})
+    row = [r for r in dbmod.list_plan("2026-06-01") if r["ticker"] == "E.T"][0]
+    assert row["days_to_earnings"] == 3
+
+
 def test_plan_has_risk_sizing_for_buy(client):
     """null 経路の不変条件: 全 plan 行に shares/risk_amount キーが存在し、非 buy 行は None。
     （buy 経路の実サイジングは test_perform_refresh_sizes_buy_end_to_end が担保）"""
