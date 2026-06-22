@@ -211,3 +211,87 @@ def test_run_backtest_plan_caps_at_bucket_cash():
     for t in r["trades"]:
         if t["action"] == "buy":
             assert t["shares"] * t["price"] <= bucket + 1e-6   # バケット現金を超えない
+
+
+def test_plan_exit_params_default_off_is_unchanged():
+    """trail/time 既定OFFは現挙動を完全再現（約定価格・closed_pnls・既存countが不変）。"""
+    from market import synthetic_history
+    import backtest
+    hist = {f"T{i}.T": synthetic_history(f"T{i}.T", n=120, seed=i) for i in range(3)}
+    kw = dict(configs=None, exit_mode="plan", backtest_days=40, buy_threshold=2,
+              sell_threshold=-2, initial_capital=5_000_000)
+    base = backtest.run_backtest(hist, **kw)
+    explicit = backtest.run_backtest(hist, trail_atr_mult=0.0, max_hold_days=0, **kw)
+    assert base["closed_pnls"] == explicit["closed_pnls"]
+    assert [round(t["price"], 6) for t in base["trades"]] == \
+           [round(t["price"], 6) for t in explicit["trades"]]
+    assert base["take_profit_count"] == explicit["take_profit_count"]
+    assert base["stop_loss_count"] == explicit["stop_loss_count"]
+    assert explicit["trail_exit_count"] == 0 and explicit["time_exit_count"] == 0
+
+
+def test_plan_trailing_exit_locks_profit(monkeypatch):
+    """上昇後の押し目でトレーリングstopが利益を確保して決済（理由 trail・固定targetは無効）。"""
+    import backtest as bt_mod
+    import numpy as np, pandas as pd
+    closes = [100, 100, 105, 130, 150, 170, 190, 160]
+    highs  = [100, 102, 108, 132, 152, 172, 192, 175]
+    lows   = [100,  98, 104, 128, 148, 168, 188, 160]   # low[2]=104 で limit 約定
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-01"), periods=len(closes))
+    df = pd.DataFrame({"open": closes, "high": highs, "low": lows,
+                       "close": closes, "volume": np.full(len(closes), 1e6)}, index=idx)
+
+    calls = {"n": 0}
+    def fake_eval(window, configs, bth, sth, regime=None, rs_strength=None):
+        calls["n"] += 1
+        return (3, "buy", {"confidence": None}) if calls["n"] == 1 else (0, "neutral", {})
+    def fake_plan(window, direction, score, configs=None):
+        return {"limit_price": 104.0, "stop_price": 80.0, "target_price": 999.0,
+                "atr": 10.0, "rationale": "x"}
+    monkeypatch.setattr(bt_mod, "evaluate", fake_eval)
+    monkeypatch.setattr(bt_mod, "build_plan", fake_plan)
+
+    kw = dict(configs=DEFAULT_CONFIGS, exit_mode="plan", backtest_days=len(closes),
+              warmup_days=1, initial_capital=1_000_000,
+              cost={"commission_bps": 0.0, "slippage_bps": 0.0})
+    r = bt_mod.run_backtest({"X.T": df}, trail_atr_mult=3.0, **kw)
+    assert r["trail_exit_count"] >= 1          # トレーリングで決済した
+    assert r["take_profit_count"] == 0         # 固定 target は無効化される
+    assert any(p > 0 for p in r["closed_pnls"])  # 利益を確保した決済がある
+
+    calls["n"] = 0                              # fake_eval カウンタを戻して固定モードで再実行
+    fixed = bt_mod.run_backtest({"X.T": df}, trail_atr_mult=0.0, **kw)
+    assert fixed["trail_exit_count"] == 0      # 固定モードに trail 決済は無い
+
+
+def test_plan_trailing_stop_is_lookahead_safe(monkeypatch):
+    """当日高値は当日のトレーリングstopに効かない（high_water は前バーまで）。
+    i=3 の急騰高値で当日決済されず、i=5 で前バーまでの high_water 基準に決済される。"""
+    import backtest as bt_mod
+    import numpy as np, pandas as pd
+    closes = [100, 100, 105, 175, 175, 170, 165]
+    highs  = [100, 102, 108, 200, 180, 175, 170]   # i=3 で 200 に急騰
+    lows   = [100,  98, 104, 170, 171, 169, 160]   # low[2]=104 約定
+    idx = pd.bdate_range(end=pd.Timestamp("2026-06-01"), periods=len(closes))
+    df = pd.DataFrame({"open": closes, "high": highs, "low": lows,
+                       "close": closes, "volume": np.full(len(closes), 1e6)}, index=idx)
+
+    calls = {"n": 0}
+    def fake_eval(window, configs, bth, sth, regime=None, rs_strength=None):
+        calls["n"] += 1
+        return (3, "buy", {"confidence": None}) if calls["n"] == 1 else (0, "neutral", {})
+    def fake_plan(window, direction, score, configs=None):
+        return {"limit_price": 104.0, "stop_price": 80.0, "target_price": 999.0,
+                "atr": 10.0, "rationale": "x"}
+    monkeypatch.setattr(bt_mod, "evaluate", fake_eval)
+    monkeypatch.setattr(bt_mod, "build_plan", fake_plan)
+
+    r = bt_mod.run_backtest({"X.T": df}, configs=DEFAULT_CONFIGS, exit_mode="plan",
+                            backtest_days=len(closes), warmup_days=1, trail_atr_mult=3.0,
+                            initial_capital=1_000_000,
+                            cost={"commission_bps": 0.0, "slippage_bps": 0.0})
+    assert r["trail_exit_count"] == 1
+    # 当日高値で決済していれば days=1（i=3）。前バーまでの high_water なら days=3（i=5）。
+    assert r["avg_holding_days"] == 3.0
+    sells = [t for t in r["trades"] if t["action"] == "sell"]
+    assert len(sells) == 1 and round(sells[0]["price"], 6) == 170.0

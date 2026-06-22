@@ -11,7 +11,7 @@ import pandas as pd
 
 from costs import DEFAULT_COST, apply_costs, commission_cost
 from signals import (BUY_THRESHOLD, DEFAULT_CONFIGS, DEFAULT_RISK_PCT, SELL_THRESHOLD,
-                     build_plan, evaluate, position_size)
+                     build_plan, evaluate, position_size, trailing_stop)
 
 INITIAL_CAPITAL = 3000.0   # 仮想資金（円）
 BACKTEST_DAYS = 22         # 評価営業日数（≒1ヶ月）
@@ -42,6 +42,7 @@ def run_backtest(
     buy_threshold=BUY_THRESHOLD, sell_threshold=SELL_THRESHOLD,
     exit_mode="score", cost=None, eval_start_date=None, regime_series=None,
     index_history=None, rs_params=None, risk_pct=DEFAULT_RISK_PCT,
+    trail_atr_mult=0.0, max_hold_days=0,
 ) -> dict:
     """exit_mode='score'（既定）はスコア反転で決済。'plan'（旧'atr'）は提示指値で約定する出口入り。
 
@@ -56,7 +57,8 @@ def run_backtest(
                                   warmup_days, buy_threshold, sell_threshold, cost,
                                   eval_start_date, regime_series,
                                   index_history=index_history, rs_params=rs_params,
-                                  risk_pct=risk_pct)
+                                  risk_pct=risk_pct,
+                                  trail_atr_mult=trail_atr_mult, max_hold_days=max_hold_days)
 
     n_tickers = len(histories)
     cash = initial_capital
@@ -151,7 +153,8 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                        warmup_days, buy_threshold, sell_threshold, cost,
                        eval_start_date, regime_series=None,
                        index_history=None, rs_params=None,
-                       risk_pct=DEFAULT_RISK_PCT) -> dict:
+                       risk_pct=DEFAULT_RISK_PCT,
+                       trail_atr_mult=0.0, max_hold_days=0) -> dict:
     """提示指値（build_plan）で約定し、ATR の損切/利確で決済する出口入りシミュレーション。
 
     検証=提示：作戦ボードと同一の limit_price/stop_price/target_price で約定検証する。
@@ -172,7 +175,9 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
         shares = 0.0
         entry_price = stop = target = None
         entry_i = None
-        pending = None   # {"limit","stop","target","expires"}
+        entry_atr = None
+        high_water = None
+        pending = None   # {"limit","stop","target","expires","confidence","atr"}
         start = max(warmup_days, len(df) - backtest_days)
 
         for i in range(start, len(df)):
@@ -204,6 +209,8 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                         shares = affordable
                         cash = 0.0
                     entry_price, stop, target, entry_i = fill, pending["stop"], pending["target"], i
+                    entry_atr = pending.get("atr")
+                    high_water = high
                     orders_filled += 1
                     trades.append({"date": d, "ticker": ticker, "action": "buy",
                                    "price": fill, "shares": shares})
@@ -211,10 +218,19 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                 elif i >= pending["expires"]:
                     pending = None   # 期限切れ（約定せず失効）
 
-            # 2) 保有中（エントリー当日を除く）：損切優先で stop/target をチェック
+            # 2) 保有中（エントリー当日を除く）：トレーリング/損切/利確
             if shares > 0 and entry_i is not None and i > entry_i:
-                exit_raw, reason = (stop, "stop") if low <= stop else \
-                    (target, "target") if high >= target else (None, None)
+                trailing = trail_atr_mult > 0 and entry_atr is not None
+                # トレーリングstopは high_water（前バーまで）で算出。当日高値は当日stopに効かせない。
+                cur_stop = trailing_stop(stop, high_water, entry_atr, trail_atr_mult, "buy") \
+                    if trailing else stop
+                if low <= cur_stop:
+                    exit_raw, reason = cur_stop, ("trail" if trailing else "stop")
+                elif not trailing and high >= target:   # 固定targetはトレーリングOFF時のみ
+                    exit_raw, reason = target, "target"
+                else:
+                    exit_raw, reason = None, None
+                # （Task 3 でここに time-exit を追加）
                 if exit_raw is not None:
                     fill = apply_costs(exit_raw, "sell", cost)
                     proceeds = shares * fill
@@ -224,7 +240,11 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                     cash += proceeds
                     trades.append({"date": d, "ticker": ticker, "action": "sell",
                                    "price": fill, "shares": shares})
-                    shares = 0.0; entry_price = stop = target = None; entry_i = None
+                    shares = 0.0; entry_price = stop = target = None
+                    entry_i = None; entry_atr = None; high_water = None
+                elif trailing:
+                    # 未決済なら当日高値で high_water 更新（cur_stop 算出の後＝look-ahead回避）
+                    high_water = max(high_water, high)
 
             # 3) 当日終値で判定（意思決定）。指標窓は全履歴 df.iloc[:i+1]。
             window = df.iloc[:i + 1]
@@ -241,7 +261,8 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                     cash += proceeds
                     trades.append({"date": d, "ticker": ticker, "action": "sell",
                                    "price": fill, "shares": shares})
-                    shares = 0.0; entry_price = stop = target = None; entry_i = None
+                    shares = 0.0; entry_price = stop = target = None
+                    entry_i = None; entry_atr = None; high_water = None
                 elif in_window and shares == 0 and direction == "buy":
                     plan = build_plan(window, "buy", score, configs)
                     if plan["limit_price"] and plan["stop_price"] and plan["target_price"]:
@@ -249,7 +270,7 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
                         # 毎営業日の買いシグナルで指値を更新（前日の未約定指値は取消＝新規発注扱い）。
                         pending = {"limit": plan["limit_price"], "stop": plan["stop_price"],
                                    "target": plan["target_price"], "expires": i + entry_expiry_days,
-                                   "confidence": detail.get("confidence")}
+                                   "confidence": detail.get("confidence"), "atr": plan["atr"]}
                         orders_placed += 1
 
             if in_window:
@@ -291,5 +312,7 @@ def _run_backtest_plan(histories, configs, initial_capital, backtest_days,
         "take_profit_count": sum(1 for c in closed if c["reason"] == "target"),
         "stop_loss_count": sum(1 for c in closed if c["reason"] == "stop"),
         "signal_exit_count": sum(1 for c in closed if c["reason"] == "signal"),
+        "trail_exit_count": sum(1 for c in closed if c["reason"] == "trail"),
+        "time_exit_count": sum(1 for c in closed if c["reason"] == "time"),
         "avg_holding_days": avg_holding, "risk_reward": risk_reward,
     }
