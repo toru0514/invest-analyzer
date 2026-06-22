@@ -195,7 +195,7 @@ def test_run_backtest_plan_risk_sizes_by_stop_width():
     large = backtest.run_backtest(hist, risk_pct=2.0, **kw)
     buys_small = sum(t["shares"] for t in small["trades"] if t["action"] == "buy")
     buys_large = sum(t["shares"] for t in large["trades"] if t["action"] == "buy")
-    assert buys_large > 0, "buy が一度も約定していない＝テストが空虚"
+    assert buys_small > 0 and buys_large > 0, "buy が一度も約定していない＝テストが空虚"
     assert buys_large > buys_small        # リスク許容が大きいほど株数が多い
 
 
