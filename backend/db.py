@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS daily_plan (
   target_price  REAL,
   rationale     TEXT,
   confidence    REAL,
+  shares        REAL,
+  risk_amount   REAL,
   ai_summary    TEXT,
   ai_confidence INTEGER,
   ai_risks      TEXT,
@@ -136,8 +138,11 @@ def get_conn():
 def _migrate_daily_plan(conn):
     """既存 data.db の daily_plan に後付けの追加列（AI解説・量的確信度）が無ければ追加（冪等）。"""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(daily_plan)").fetchall()}
-    for col, decl in (("ai_summary", "TEXT"), ("ai_confidence", "INTEGER"),
-                      ("ai_risks", "TEXT"), ("confidence", "REAL")):
+    for col, decl in (("vol_ratio", "REAL"), ("weekly_trend", "TEXT"),
+                      ("ai_summary", "TEXT"), ("ai_confidence", "INTEGER"),
+                      ("ai_risks", "TEXT"), ("confidence", "REAL"),
+                      ("shares", "REAL"), ("risk_amount", "REAL"),
+                      ("created_at", "TEXT")):
         if col not in cols:
             conn.execute(f"ALTER TABLE daily_plan ADD COLUMN {col} {decl}")
 
@@ -410,22 +415,24 @@ def delete_holding(ticker: str):
 def upsert_plan(row: dict):
     """1銘柄分の作戦を (ticker, plan_date) で upsert。"""
     row = {**row}
-    for k in ("ai_summary", "ai_confidence", "ai_risks", "confidence"):
+    for k in ("vol_ratio", "weekly_trend", "ai_summary", "ai_confidence", "ai_risks",
+              "confidence", "shares", "risk_amount"):
         row.setdefault(k, None)
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO daily_plan "
             "(ticker, plan_date, direction, score, vol_ratio, weekly_trend, "
             " limit_price, stop_price, target_price, rationale, confidence, "
-            " ai_summary, ai_confidence, ai_risks) "
+            " shares, risk_amount, ai_summary, ai_confidence, ai_risks) "
             "VALUES (:ticker, :plan_date, :direction, :score, :vol_ratio, :weekly_trend, "
             " :limit_price, :stop_price, :target_price, :rationale, :confidence, "
-            " :ai_summary, :ai_confidence, :ai_risks) "
+            " :shares, :risk_amount, :ai_summary, :ai_confidence, :ai_risks) "
             "ON CONFLICT(ticker, plan_date) DO UPDATE SET "
             "direction=excluded.direction, score=excluded.score, vol_ratio=excluded.vol_ratio, "
             "weekly_trend=excluded.weekly_trend, limit_price=excluded.limit_price, "
             "stop_price=excluded.stop_price, target_price=excluded.target_price, "
             "rationale=excluded.rationale, confidence=excluded.confidence, "
+            "shares=excluded.shares, risk_amount=excluded.risk_amount, "
             "ai_summary=excluded.ai_summary, "
             "ai_confidence=excluded.ai_confidence, ai_risks=excluded.ai_risks, "
             "created_at=datetime('now')",

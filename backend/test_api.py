@@ -280,3 +280,36 @@ def test_optimize_still_ok_with_regime(client):
     r = client.post("/optimize", json={"demo": True, "split_ratio": 0.7})
     assert r.status_code == 200
     assert r.json()["out_of_sample"]["sample"] == "out_of_sample"
+
+
+def test_daily_plan_sizing_columns_and_upsert(tmp_path, monkeypatch):
+    import sqlite3
+    import db as dbmod
+    dbfile = tmp_path / "old.db"
+    # shares/risk_amount 列が無い旧 daily_plan を作る
+    conn = sqlite3.connect(dbfile)
+    conn.execute("CREATE TABLE daily_plan (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                 "ticker TEXT NOT NULL, plan_date TEXT NOT NULL, direction TEXT, score INTEGER, "
+                 "limit_price REAL, stop_price REAL, target_price REAL, rationale TEXT, "
+                 "UNIQUE(ticker, plan_date))")
+    conn.execute("INSERT INTO daily_plan (ticker, plan_date, direction, score) "
+                 "VALUES ('OLD.T','2026-06-01','buy',3)")
+    conn.commit(); conn.close()
+
+    # get_conn() は呼び出し時にモジュール global db.DB_PATH を読む（db.py は @contextmanager）。
+    # monkeypatch.setattr なら teardown で自動復元＝他テストを汚染しない（reload は使わない）。
+    monkeypatch.setattr(dbmod, "DB_PATH", str(dbfile))
+    dbmod.init_db()                                   # 冪等マイグレーションで列追加
+    with dbmod.get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(daily_plan)")}
+    assert {"shares", "risk_amount"} <= cols
+    # 旧行は NULL のまま読める
+    old = [r for r in dbmod.list_plan("2026-06-01") if r["ticker"] == "OLD.T"][0]
+    assert old["shares"] is None and old["risk_amount"] is None
+    # 新規 upsert で値が入る
+    dbmod.upsert_plan({"ticker": "NEW.T", "plan_date": "2026-06-01", "direction": "buy",
+                       "score": 3, "limit_price": 1000.0, "stop_price": 950.0,
+                       "target_price": 1100.0, "rationale": "x",
+                       "confidence": 70.0, "shares": 200.0, "risk_amount": 10000.0})
+    new = [r for r in dbmod.list_plan("2026-06-01") if r["ticker"] == "NEW.T"][0]
+    assert new["shares"] == 200.0 and new["risk_amount"] == 10000.0
