@@ -11,6 +11,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { api, BacktestResult } from "@/lib/api";
+import { buildBacktestBody } from "@/lib/backtest";
 import DirectionBadge from "@/components/DirectionBadge";
 import Disclaimer from "@/components/Disclaimer";
 
@@ -20,6 +21,8 @@ export default function Simulation() {
   const [demo, setDemo] = useState(true);
   const [persist, setPersist] = useState(false);
   const [atrExit, setAtrExit] = useState(false);
+  const [trailAtrMult, setTrailAtrMult] = useState(0);
+  const [maxHoldDays, setMaxHoldDays] = useState(0);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,10 +31,9 @@ export default function Simulation() {
     setLoading(true);
     setError(null);
     try {
-      const r = await api.backtest({
-        initial_capital: capital, days, demo, persist,
-        exit_mode: atrExit ? "plan" : "score",
-      });
+      const r = await api.backtest(
+        buildBacktestBody({ capital, days, demo, persist, atrExit, trailAtrMult, maxHoldDays }),
+      );
       setResult(r);
     } catch (e) {
       setError(String(e));
@@ -76,6 +78,29 @@ export default function Simulation() {
             <input type="checkbox" checked={atrExit} onChange={(e) => setAtrExit(e.target.checked)} />
             ATR出口ルールを使う（押し目指値＋損切/利確）
           </label>
+          {atrExit && (
+            <>
+              <label className="flex flex-col gap-1">
+                トレーリングATR倍率（0=OFF）
+                <input
+                  type="number"
+                  step="0.5"
+                  value={trailAtrMult}
+                  onChange={(e) => setTrailAtrMult(Number(e.target.value))}
+                  className="w-40 rounded border px-2 py-1"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                最大保有日数（0=OFF）
+                <input
+                  type="number"
+                  value={maxHoldDays}
+                  onChange={(e) => setMaxHoldDays(Number(e.target.value))}
+                  className="w-40 rounded border px-2 py-1"
+                />
+              </label>
+            </>
+          )}
           <button
             onClick={run}
             disabled={loading}
@@ -122,6 +147,8 @@ export default function Simulation() {
                 <Metric label="利確で決済" value={`${result.take_profit_count ?? 0} 回`} />
                 <Metric label="損切で決済" value={`${result.stop_loss_count ?? 0} 回`} />
                 <Metric label="逆シグナルで決済" value={`${result.signal_exit_count ?? 0} 回`} />
+                <Metric label="トレーリングで決済" value={`${result.trail_exit_count ?? 0} 回`} />
+                <Metric label="時間切れで決済" value={`${result.time_exit_count ?? 0} 回`} />
                 <Metric label="平均保有日数" value={result.avg_holding_days == null ? "N/A" : `${result.avg_holding_days.toFixed(1)} 日`} />
                 <Metric label="リスクリワード実績" value={result.risk_reward == null ? "N/A" : `${result.risk_reward.toFixed(2)} : 1`} />
               </div>
