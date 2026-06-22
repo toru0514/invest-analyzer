@@ -333,7 +333,12 @@ def test_daily_plan_sizing_columns_and_upsert(tmp_path, monkeypatch):
 
 
 def test_plan_has_risk_sizing_for_buy(client):
-    client.post("/watchlist", json={"ticker": "7203.T", "name": "トヨタ"})
+    """null 経路の不変条件: 全 plan 行に shares/risk_amount キーが存在し、非 buy 行は None。
+    （buy 経路の実サイジングは test_perform_refresh_sizes_buy_end_to_end が担保）"""
+    # 7203.T は DEFAULT_WATCHLIST に既存。watchlist に ticker UNIQUE が無いため
+    # 無条件 POST は重複行を残す（共有 module-scoped DB を汚す）。未登録時のみ追加する。
+    if not any(w["ticker"] == "7203.T" for w in client.get("/watchlist").json()):
+        client.post("/watchlist", json={"ticker": "7203.T", "name": "トヨタ"})
     client.post("/refresh?demo=true")
     rows = client.get("/plan").json()["rows"]
     assert rows, "プラン行が無い"
