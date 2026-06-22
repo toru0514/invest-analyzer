@@ -144,3 +144,14 @@ def test_evaluate_holdout_accepts_exit_params():
     hist = {f"T{i}.T": synthetic_history(f"T{i}.T", n=160, seed=i) for i in range(2)}
     res = evaluate_holdout(hist, None, trail_atr_mult=3.0, max_hold_days=10)
     assert "out_of_sample" in res and "chosen_params" in res
+
+
+def test_evaluate_holdout_accepts_earnings_params():
+    """evaluate_holdout が earnings_map/earnings_exit_days を受領して完走する（挙動差は backtest 層で担保）。"""
+    import pandas as pd
+    from market import synthetic_history
+    from evaluation import evaluate_holdout
+    hist = {f"T{i}.T": synthetic_history(f"T{i}.T", n=160, seed=i) for i in range(2)}
+    emap = {t: [df.index[len(df) // 2]] for t, df in hist.items()}
+    res = evaluate_holdout(hist, None, earnings_map=emap, earnings_exit_days=1)
+    assert "out_of_sample" in res and "chosen_params" in res

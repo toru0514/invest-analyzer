@@ -80,7 +80,8 @@ def _split_date(histories, split_ratio):
 def evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=None, cost=None,
                      initial_capital=3000.0, warmup_days=35, regime_series=None,
                      index_history=None, rs_params=None, risk_pct=None,
-                     trail_atr_mult=0.0, max_hold_days=0) -> dict:
+                     trail_atr_mult=0.0, max_hold_days=0,
+                     earnings_map=None, earnings_exit_days=0) -> dict:
     """シンプルホールドアウト2段構え：train(in-sample) で閾値を選び test(out-of-sample) で評価。
 
     look-ahead 回避：test 窓のパラメータは train 窓の成績のみから選ぶ。
@@ -105,7 +106,8 @@ def evaluate_holdout(histories, configs, *, split_ratio=0.7, grid=None, cost=Non
                             cost=cost, eval_start_date=eval_start, regime_series=regime_series,
                             index_history=index_history, rs_params=rs_params,
                             risk_pct=risk_pct,
-                            trail_atr_mult=trail_atr_mult, max_hold_days=max_hold_days)
+                            trail_atr_mult=trail_atr_mult, max_hold_days=max_hold_days,
+                            earnings_map=earnings_map, earnings_exit_days=earnings_exit_days)
 
     # in-sample 探索：閾値ごとに train 成績（期待値）で最良を選ぶ
     sweep, best = [], None
