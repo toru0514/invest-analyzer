@@ -166,6 +166,11 @@ def _safe_pos_float(raw, default: float, max_value: float | None = None) -> floa
     return v
 
 
+def _risk_pct() -> float:
+    """設定値 risk_pct（%）を返す。未設定・不正値は 1.0 にフォールバック。"""
+    return _safe_pos_float(db.get_all_meta().get("risk_pct", "1.0"), 1.0, max_value=100.0)
+
+
 @app.get("/settings")
 def get_settings():
     m = db.get_all_meta()
@@ -543,7 +548,7 @@ def backtest(payload: BacktestIn):
     result = run_backtest(histories, configs=common, initial_capital=payload.initial_capital,
                           backtest_days=bdays, buy_threshold=buy_th, sell_threshold=sell_th,
                           exit_mode=payload.exit_mode, cost=cost, regime_series=rs,
-                          index_history=idx_df, rs_params=rs_params)
+                          index_history=idx_df, rs_params=rs_params, risk_pct=_risk_pct())
     result["failed"] = failed
     result["significance"] = summary_stats(result["closed_pnls"])
     result["benchmark"] = benchmark(histories, common, buy_threshold=buy_th, sell_threshold=sell_th,
@@ -586,7 +591,7 @@ def optimize(payload: OptimizeIn):
     rs_params = _find_cfg(common, "relative_strength")
     res = evaluate_holdout(histories, common, split_ratio=payload.split_ratio, cost=cost,
                            initial_capital=payload.initial_capital, regime_series=rs,
-                           index_history=idx_df, rs_params=rs_params)
+                           index_history=idx_df, rs_params=rs_params, risk_pct=_risk_pct())
     res["failed"] = failed
     res["tickers"] = list(histories.keys())
     return res

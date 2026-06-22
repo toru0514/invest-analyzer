@@ -127,3 +127,11 @@ def test_benchmark_and_holdout_accept_rs_params():
     h = evaluation.evaluate_holdout(hist, None, initial_capital=3000.0, warmup_days=35,
                                     index_history=idx, rs_params={"period": 20, "scale": 0.10})
     assert "out_of_sample" in h
+
+
+def test_evaluate_holdout_accepts_risk_pct():
+    from market import synthetic_history
+    from evaluation import evaluate_holdout
+    hist = {f"P{i}.T": synthetic_history(f"P{i}.T", n=200, seed=i) for i in range(2)}
+    res = evaluate_holdout(hist, configs=None, initial_capital=5_000_000, risk_pct=0.5)
+    assert "chosen_params" in res and "out_of_sample" in res
