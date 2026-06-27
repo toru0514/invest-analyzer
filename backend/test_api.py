@@ -395,6 +395,31 @@ def test_migrate_exit_rr_updates_old_default(tmp_path, monkeypatch):
     assert common2["params"]["target_mult"] == 6.0
 
 
+def test_migrate_exit_rr_is_one_shot(tmp_path, monkeypatch):
+    """移行は一度だけ。移行後にユーザーが target_mult=1.5（対称R:R）へ戻しても再 init_db で上書きしない。"""
+    import sqlite3, json
+    import db as dbmod
+    dbfile = tmp_path / "oneshot.db"
+    conn = sqlite3.connect(dbfile)
+    conn.executescript(dbmod.SCHEMA)
+    conn.execute("INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+                 "VALUES (NULL,'atr_exit',?,1,1)", (json.dumps({"target_mult": 1.5}),))
+    conn.commit(); conn.close()
+    monkeypatch.setattr(dbmod, "DB_PATH", str(dbfile))
+
+    dbmod.init_db()                # 1回目: 旧既定1.5→6.0
+    atr = [c for c in dbmod.list_configs()
+           if c["ticker"] is None and c["rule_type"] == "atr_exit"][0]
+    assert atr["params"]["target_mult"] == 6.0
+
+    # ユーザーが対称R:R(1.5)へ意図的に戻す
+    dbmod.update_config(atr["id"], params={**atr["params"], "target_mult": 1.5})
+    dbmod.init_db()                # 2回目: 一度きりなので強制上書きしない
+    atr2 = [c for c in dbmod.list_configs()
+            if c["ticker"] is None and c["rule_type"] == "atr_exit"][0]
+    assert atr2["params"]["target_mult"] == 1.5   # ユーザーの選択が保たれる
+
+
 def test_plan_has_risk_sizing_for_buy(client):
     """null 経路の不変条件: 全 plan 行に shares/risk_amount キーが存在し、非 buy 行は None。
     （buy 経路の実サイジングは test_perform_refresh_sizes_buy_end_to_end が担保）"""

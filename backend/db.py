@@ -163,6 +163,19 @@ def _migrate_exit_rr(conn):
                          (json.dumps(params), r["id"]))
 
 
+def _migrate_exit_rr_once(conn):
+    """`_migrate_exit_rr` を app_meta フラグで**一度だけ**実行する（毎起動の恒久強制にしない）。
+
+    init_db は起動毎に呼ばれる。移行を毎回かけると、ユーザーが設定UIで target_mult=1.5
+    （対称R:R）を意図的に選んでも再起動で 6.0 に上書きされてしまう（target_mult は編集可能）。
+    一度だけにすることで、レガシーDBの旧既定だけ是正し、以後の選択は尊重する。
+    """
+    if conn.execute("SELECT value FROM app_meta WHERE key = 'exit_rr_migrated'").fetchone():
+        return
+    _migrate_exit_rr(conn)
+    conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('exit_rr_migrated', '1')")
+
+
 def init_db():
     """スキーマ作成 + 初期データ（watchlist / signal_config）を投入。"""
     from signals import DEFAULT_CONFIGS
@@ -170,7 +183,7 @@ def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
         _migrate_daily_plan(conn)
-        _migrate_exit_rr(conn)
+        _migrate_exit_rr_once(conn)
 
         # 監視銘柄が空なら既定を投入
         n = conn.execute("SELECT COUNT(*) AS c FROM watchlist").fetchone()["c"]
