@@ -361,6 +361,40 @@ def test_daily_plan_earnings_column_migration(tmp_path, monkeypatch):
     assert row["days_to_earnings"] == 3
 
 
+def test_migrate_exit_rr_updates_old_default(tmp_path, monkeypatch):
+    """既存DBの atr_exit を旧既定 target_mult=1.5→6.0 に是正（非クロバー・冪等・per-ticker含む）。"""
+    import sqlite3, json
+    import db as dbmod
+    dbfile = tmp_path / "old_rr.db"
+    conn = sqlite3.connect(dbfile)
+    conn.executescript(dbmod.SCHEMA)   # signal_config 等を作成
+    # common 旧既定(1.5)・per-ticker 旧既定(1.5)・per-ticker ユーザー設定(3.0)
+    conn.execute("INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+                 "VALUES (NULL,'atr_exit',?,1,1)",
+                 (json.dumps({"length": 14, "stop_mult": 1.5, "target_mult": 1.5}),))
+    conn.execute("INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+                 "VALUES ('7203.T','atr_exit',?,1,1)", (json.dumps({"target_mult": 1.5}),))
+    conn.execute("INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+                 "VALUES ('8306.T','atr_exit',?,1,1)", (json.dumps({"target_mult": 3.0}),))
+    conn.commit(); conn.close()
+
+    monkeypatch.setattr(dbmod, "DB_PATH", str(dbfile))
+    dbmod.init_db()
+
+    cfgs = dbmod.list_configs()
+    def tgt(ticker):
+        row = [c for c in cfgs if c["ticker"] == ticker and c["rule_type"] == "atr_exit"][0]
+        return row["params"].get("target_mult")
+    assert tgt(None) == 6.0        # common 旧既定 → 6.0
+    assert tgt("7203.T") == 6.0    # per-ticker 旧既定 → 6.0（per-ticker も対象）
+    assert tgt("8306.T") == 3.0    # ユーザー設定 → 不変（非クロバー）
+
+    dbmod.init_db()                # 冪等: 再実行で不変
+    cfgs2 = dbmod.list_configs()
+    common2 = [c for c in cfgs2 if c["ticker"] is None and c["rule_type"] == "atr_exit"][0]
+    assert common2["params"]["target_mult"] == 6.0
+
+
 def test_plan_has_risk_sizing_for_buy(client):
     """null 経路の不変条件: 全 plan 行に shares/risk_amount キーが存在し、非 buy 行は None。
     （buy 経路の実サイジングは test_perform_refresh_sizes_buy_end_to_end が担保）"""

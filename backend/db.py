@@ -147,6 +147,22 @@ def _migrate_daily_plan(conn):
             conn.execute(f"ALTER TABLE daily_plan ADD COLUMN {col} {decl}")
 
 
+def _migrate_exit_rr(conn):
+    """既存 DB の atr_exit を旧既定 R:R(target_mult=1.5)→新既定(6.0) に是正（冪等・非クロバー）。
+
+    ユーザーが意図的に設定した値（!=1.5）は変えない。common・per-ticker 両方が対象。
+    1.5 は IEEE-754 で厳密表現でき JSON を往復しても == 1.5 が安定（spec-review 確認済み）。
+    """
+    rows = conn.execute(
+        "SELECT id, params FROM signal_config WHERE rule_type = 'atr_exit'").fetchall()
+    for r in rows:
+        params = json.loads(r["params"] or "{}")
+        if params.get("target_mult") == 1.5:
+            params["target_mult"] = 6.0
+            conn.execute("UPDATE signal_config SET params = ? WHERE id = ?",
+                         (json.dumps(params), r["id"]))
+
+
 def init_db():
     """スキーマ作成 + 初期データ（watchlist / signal_config）を投入。"""
     from signals import DEFAULT_CONFIGS
@@ -154,6 +170,7 @@ def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
         _migrate_daily_plan(conn)
+        _migrate_exit_rr(conn)
 
         # 監視銘柄が空なら既定を投入
         n = conn.execute("SELECT COUNT(*) AS c FROM watchlist").fetchone()["c"]
