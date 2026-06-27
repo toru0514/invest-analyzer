@@ -176,6 +176,35 @@ def _migrate_exit_rr_once(conn):
     conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('exit_rr_migrated', '1')")
 
 
+def _migrate_entry_method(conn):
+    """既存 DB の atr_exit 入口を旧既定(ma + entry_atr_mult 0.5)→新既定(atr + 0.25) に是正（冪等・非クロバー）。
+
+    旧既定ペアの行だけ更新。ユーザーが意図的に選んだ method/depth（support 等・depth!=0.5）は変えない。
+    0.5/0.25 は IEEE-754 で厳密表現でき JSON を往復しても == が安定（_migrate_exit_rr の 1.5 と同様）。
+    """
+    rows = conn.execute(
+        "SELECT id, params FROM signal_config WHERE rule_type = 'atr_exit'").fetchall()
+    for r in rows:
+        params = json.loads(r["params"] or "{}")
+        if params.get("limit_method") == "ma" and params.get("entry_atr_mult") == 0.5:
+            params["limit_method"] = "atr"
+            params["entry_atr_mult"] = 0.25
+            conn.execute("UPDATE signal_config SET params = ? WHERE id = ?",
+                         (json.dumps(params), r["id"]))
+
+
+def _migrate_entry_method_once(conn):
+    """`_migrate_entry_method` を app_meta フラグで一度だけ実行する（毎起動の恒久強制にしない）。
+
+    `_migrate_exit_rr_once` と同方針。一度だけにすることで、レガシーDBの旧既定入口だけ是正し、
+    以後ユーザーが設定UIで ma/0.5（深押し）を選び直した選択を尊重する（再起動で上書きしない）。
+    """
+    if conn.execute("SELECT value FROM app_meta WHERE key = 'entry_method_migrated'").fetchone():
+        return
+    _migrate_entry_method(conn)
+    conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('entry_method_migrated', '1')")
+
+
 def init_db():
     """スキーマ作成 + 初期データ（watchlist / signal_config）を投入。"""
     from signals import DEFAULT_CONFIGS
@@ -184,6 +213,7 @@ def init_db():
         conn.executescript(SCHEMA)
         _migrate_daily_plan(conn)
         _migrate_exit_rr_once(conn)
+        _migrate_entry_method_once(conn)
 
         # 監視銘柄が空なら既定を投入
         n = conn.execute("SELECT COUNT(*) AS c FROM watchlist").fetchone()["c"]

@@ -420,6 +420,65 @@ def test_migrate_exit_rr_is_one_shot(tmp_path, monkeypatch):
     assert atr2["params"]["target_mult"] == 1.5   # ユーザーの選択が保たれる
 
 
+def test_migrate_entry_method_updates_old_default(tmp_path, monkeypatch):
+    """既存DBの atr_exit 入口を旧既定(ma+0.5)→新既定(atr+0.25)に是正（非クロバー・per-ticker含む）。"""
+    import sqlite3, json
+    import db as dbmod
+    dbfile = tmp_path / "old_entry.db"
+    conn = sqlite3.connect(dbfile)
+    conn.executescript(dbmod.SCHEMA)
+    # common 旧既定(ma+0.5)・per-ticker 旧既定(ma+0.5)・per-ticker ユーザー設定(method=support)
+    conn.execute("INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+                 "VALUES (NULL,'atr_exit',?,1,1)",
+                 (json.dumps({"length": 14, "stop_mult": 1.5, "target_mult": 6.0,
+                              "limit_method": "ma", "limit_ma": 5,
+                              "entry_atr_mult": 0.5, "support_n": 20}),))
+    conn.execute("INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+                 "VALUES ('7203.T','atr_exit',?,1,1)",
+                 (json.dumps({"limit_method": "ma", "entry_atr_mult": 0.5}),))
+    conn.execute("INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+                 "VALUES ('8306.T','atr_exit',?,1,1)",
+                 (json.dumps({"limit_method": "support", "entry_atr_mult": 0.5}),))
+    conn.commit(); conn.close()
+
+    monkeypatch.setattr(dbmod, "DB_PATH", str(dbfile))
+    dbmod.init_db()
+
+    cfgs = dbmod.list_configs()
+    def params(ticker):
+        return [c for c in cfgs if c["ticker"] == ticker and c["rule_type"] == "atr_exit"][0]["params"]
+    assert params(None)["limit_method"] == "atr" and params(None)["entry_atr_mult"] == 0.25
+    assert params("7203.T")["limit_method"] == "atr" and params("7203.T")["entry_atr_mult"] == 0.25
+    assert params("8306.T")["limit_method"] == "support"   # 非クロバー（method!=ma）
+
+
+def test_migrate_entry_method_is_one_shot(tmp_path, monkeypatch):
+    """移行は一度だけ。移行後にユーザーが ma+0.5（深押し）へ戻しても再 init_db で上書きしない。"""
+    import sqlite3, json
+    import db as dbmod
+    dbfile = tmp_path / "entry_oneshot.db"
+    conn = sqlite3.connect(dbfile)
+    conn.executescript(dbmod.SCHEMA)
+    conn.execute("INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+                 "VALUES (NULL,'atr_exit',?,1,1)",
+                 (json.dumps({"limit_method": "ma", "entry_atr_mult": 0.5}),))
+    conn.commit(); conn.close()
+    monkeypatch.setattr(dbmod, "DB_PATH", str(dbfile))
+
+    dbmod.init_db()                # 1回目: 旧既定 ma/0.5 → atr/0.25
+    atr = [c for c in dbmod.list_configs()
+           if c["ticker"] is None and c["rule_type"] == "atr_exit"][0]
+    assert atr["params"]["limit_method"] == "atr" and atr["params"]["entry_atr_mult"] == 0.25
+
+    # ユーザーが深押し(ma/0.5)へ意図的に戻す
+    dbmod.update_config(atr["id"], params={**atr["params"], "limit_method": "ma", "entry_atr_mult": 0.5})
+    dbmod.init_db()                # 2回目: 一度きりなので強制上書きしない
+    atr2 = [c for c in dbmod.list_configs()
+            if c["ticker"] is None and c["rule_type"] == "atr_exit"][0]
+    assert atr2["params"]["limit_method"] == "ma"      # ユーザーの選択が保たれる
+    assert atr2["params"]["entry_atr_mult"] == 0.5
+
+
 def test_plan_has_risk_sizing_for_buy(client):
     """null 経路の不変条件: 全 plan 行に shares/risk_amount キーが存在し、非 buy 行は None。
     （buy 経路の実サイジングは test_perform_refresh_sizes_buy_end_to_end が担保）"""
