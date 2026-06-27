@@ -7,6 +7,9 @@ __pycache__/
 # SQLite（Phase 1 以降）
 data.db
 *.db
+*.db-shm
+*.db-wal
+*.db.bak*
 
 # Next.js（Phase 3 以降）
 node_modules
