@@ -113,7 +113,7 @@ def test_build_plan_exits_are_ordered():
     buy = signals.build_plan(df, "buy", 3)
     assert buy["atr"] is not None
     assert buy["stop_price"] < close < buy["target_price"]
-    # 既定の買い指値（5日線方式）は現値より上に置かない（押し目買い）
+    # 既定の買い指値（atr 浅押し方式）は現値より上に置かない（押し目買い）
     assert buy["limit_price"] <= close
     sell = signals.build_plan(df, "sell", -3)
     assert sell["target_price"] < close < sell["stop_price"]
@@ -135,6 +135,20 @@ def test_build_plan_default_rr_is_asymmetric():
     sell = signals.build_plan(df, "sell", -3)
     rr_sell = (close - sell["target_price"]) / (sell["stop_price"] - close)
     assert abs(rr_sell - 4.0) < 1e-6
+
+
+def test_build_plan_default_entry_is_shallow_atr():
+    """既定の入口指値は 0.25·ATR の浅い押し目（method=atr）。伸びる玉の取り逃しを減らす（診断由来）。
+
+    buy: limit = close − 0.25·ATR ／ sell: limit = close + 0.25·ATR（method=atr は現値キャップ無し）。
+    """
+    df = synthetic_history("TEST.T", n=120, seed=7)   # n≥15 で atr_value 非None・決定論
+    close = float(df["close"].iloc[-1])
+    atr = signals.atr_value(df, 14)
+    buy = signals.build_plan(df, "buy", 3)
+    assert abs(buy["limit_price"] - (close - 0.25 * atr)) < 1e-6
+    sell = signals.build_plan(df, "sell", -3)
+    assert abs(sell["limit_price"] - (close + 0.25 * atr)) < 1e-6
 
 
 def test_build_plan_limit_method_switch():
