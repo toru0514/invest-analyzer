@@ -439,6 +439,10 @@ def test_migrate_entry_method_updates_old_default(tmp_path, monkeypatch):
     conn.execute("INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
                  "VALUES ('8306.T','atr_exit',?,1,1)",
                  (json.dumps({"limit_method": "support", "entry_atr_mult": 0.5}),))
+    # per-ticker ユーザー設定(ma だが depth!=0.5)＝AND の深さ側も非クロバー
+    conn.execute("INSERT INTO signal_config (ticker, rule_type, params, weight, enabled) "
+                 "VALUES ('9984.T','atr_exit',?,1,1)",
+                 (json.dumps({"limit_method": "ma", "entry_atr_mult": 0.3}),))
     conn.commit(); conn.close()
 
     monkeypatch.setattr(dbmod, "DB_PATH", str(dbfile))
@@ -450,6 +454,7 @@ def test_migrate_entry_method_updates_old_default(tmp_path, monkeypatch):
     assert params(None)["limit_method"] == "atr" and params(None)["entry_atr_mult"] == 0.25
     assert params("7203.T")["limit_method"] == "atr" and params("7203.T")["entry_atr_mult"] == 0.25
     assert params("8306.T")["limit_method"] == "support"   # 非クロバー（method!=ma）
+    assert params("9984.T")["limit_method"] == "ma" and params("9984.T")["entry_atr_mult"] == 0.3  # 非クロバー（depth!=0.5）
 
 
 def test_migrate_entry_method_is_one_shot(tmp_path, monkeypatch):
