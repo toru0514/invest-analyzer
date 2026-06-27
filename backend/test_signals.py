@@ -125,6 +125,18 @@ def test_build_plan_exits_are_ordered():
     assert neutral["stop_price"] < close < neutral["target_price"]
 
 
+def test_build_plan_default_rr_is_asymmetric():
+    """既定の出口 R:R は非対称（勝ちを伸ばす）: (target-close)/(close-stop) ≈ 4.0（target6/stop1.5）。"""
+    df = synthetic_history("TEST.T", n=120, seed=7)   # n≥15 で atr_value 非None
+    close = float(df["close"].iloc[-1])
+    buy = signals.build_plan(df, "buy", 3)
+    rr_buy = (buy["target_price"] - close) / (close - buy["stop_price"])
+    assert abs(rr_buy - 4.0) < 1e-6
+    sell = signals.build_plan(df, "sell", -3)
+    rr_sell = (close - sell["target_price"]) / (sell["stop_price"] - close)
+    assert abs(rr_sell - 4.0) < 1e-6
+
+
 def test_build_plan_limit_method_switch():
     df = synthetic_history("TEST.T", n=120, seed=7)
     common = [{"rule_type": "atr_exit", "weight": 1, "enabled": 1, "params": {
