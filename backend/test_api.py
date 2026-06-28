@@ -666,8 +666,9 @@ def test_perform_refresh_persists_liquidity(client):
     assert rows
     # 合成データは出来高1M〜8M・価格〜2500 ＝ 売買代金は十分（数値・正）
     assert all(r["avg_turnover"] is not None and r["avg_turnover"] > 0 for r in rows)
-    # data_health キーが必ず存在する（健全なら None）
+    # 合成データは健全＝data_health は None（issue 無し）。None-on-healthy 契約を固定。
     assert all("data_health" in r for r in rows)
+    assert all(r["data_health"] is None for r in rows)
 
 
 def test_backtest_accepts_exit_params(client):

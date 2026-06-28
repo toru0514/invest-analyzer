@@ -146,7 +146,7 @@ def get_conn():
 
 
 def _migrate_daily_plan(conn):
-    """既存 data.db の daily_plan に後付けの追加列（AI解説・量的確信度）が無ければ追加（冪等）。"""
+    """daily_plan に後付けの追加列が無ければ追加（冪等・打ち手6/8/10/11/12 対応）。"""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(daily_plan)").fetchall()}
     for col, decl in (("ai_summary", "TEXT"), ("ai_confidence", "INTEGER"),
                       ("ai_risks", "TEXT"), ("confidence", "REAL"),
