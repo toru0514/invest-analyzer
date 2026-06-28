@@ -193,3 +193,49 @@ export function planRationale(row: {
   if (tier) parts.push(`確信度は${TIER_WORD[tier]}`);
   return parts.join("。") + "。";
 }
+
+/** 作戦カードの「リスク」文配列。actionable のみ。既存の警告ヘルパを再利用し、
+ *  バッジ（決算/薄商い/データ）と同一ソース・同一しきい値で整合を保つ。
+ *  順序: 戦略リスク（週足/地合い/確信度/出来高）→ イベント（決算/薄商い/データ）→ 金額。 */
+export function planRisks(
+  row: {
+    direction: Direction;
+    weekly_trend: "up" | "down" | "flat" | null;
+    regime: "risk_on" | "neutral" | "risk_off" | null;
+    vol_ratio: number | null;
+    confidence: number | null;
+    days_to_earnings: number | null;
+    avg_turnover: number | null;
+    data_health: string | null;
+    shares: number | null;
+    risk_amount: number | null;
+    limit_price: number | null;
+  },
+  accountSize: number,
+): string[] {
+  if (row.direction === "neutral") return [];
+  const out: string[] = [];
+  // 戦略リスク
+  if (
+    (row.direction === "buy" && row.weekly_trend === "down") ||
+    (row.direction === "sell" && row.weekly_trend === "up")
+  ) {
+    out.push(`週足が逆行（${row.weekly_trend}）`);
+  }
+  if (row.regime === "risk_off") out.push("地合いが弱い（リスクオフ）");
+  if (confidenceTier(row.confidence) === "low") out.push("確信度が低め");
+  if (row.vol_ratio != null && row.vol_ratio < 0.7) out.push("出来高が細い");
+  // イベント（既存ヘルパ再利用）
+  const ew = earningsWarning(row.days_to_earnings);
+  if (ew) out.push(`${ew.days}日後に決算`);
+  if (liquidityWarning(row.avg_turnover)) out.push("薄商い（約定しづらい）");
+  out.push(...dataHealthWarnings(row.data_health));
+  // 金額（riskSummary 再利用）
+  const rs = riskSummary(row, accountSize);
+  if (rs) {
+    out.push(
+      `損切り到達で約 −¥${Math.round(rs.riskAmount).toLocaleString()}（口座の${rs.riskPctOfAccount.toFixed(1)}%）`,
+    );
+  }
+  return out;
+}

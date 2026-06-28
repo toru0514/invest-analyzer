@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeRows, applyRefresh, selectTopN, riskSummary, earningsWarning, liquidityWarning, dataHealthWarnings, LIQUIDITY_MIN_YEN, Row, confidenceTier, planRationale } from "@/lib/rows";
+import { mergeRows, applyRefresh, selectTopN, riskSummary, earningsWarning, liquidityWarning, dataHealthWarnings, LIQUIDITY_MIN_YEN, Row, confidenceTier, planRationale, planRisks } from "@/lib/rows";
 import { RefreshRow, Signal, WatchItem } from "@/lib/api";
 
 const watch: WatchItem[] = [
@@ -209,6 +209,68 @@ describe("planRationale", () => {
       direction: "neutral", weekly_trend: "up", regime: "risk_on",
       vol_ratio: 2, confidence: 80,
     })).toBeNull();
+  });
+});
+
+describe("planRisks", () => {
+  type RiskRow = Parameters<typeof planRisks>[0];
+  const base: RiskRow = {
+    direction: "buy", weekly_trend: "up", regime: "risk_on",
+    vol_ratio: 1.2, confidence: 70,
+    days_to_earnings: null, avg_turnover: 500_000_000, data_health: null,
+    shares: null, risk_amount: null, limit_price: null,
+  };
+  const mk = (o: Partial<RiskRow>): RiskRow => ({ ...base, ...o });
+
+  it("健全な buy はリスク無し（空配列）", () => {
+    expect(planRisks(base, 1_000_000)).toEqual([]);
+  });
+  it("neutral は空配列", () => {
+    expect(planRisks(mk({ direction: "neutral" }), 1_000_000)).toEqual([]);
+  });
+  it("週足逆行（buy×down）を出す", () => {
+    expect(planRisks(mk({ weekly_trend: "down" }), 1_000_000)).toContain("週足が逆行（down）");
+  });
+  it("地合いリスクオフを出す", () => {
+    expect(planRisks(mk({ regime: "risk_off" }), 1_000_000)).toContain("地合いが弱い（リスクオフ）");
+  });
+  it("低確信を出す", () => {
+    expect(planRisks(mk({ confidence: 20 }), 1_000_000)).toContain("確信度が低め");
+  });
+  it("出来高細りを出す", () => {
+    expect(planRisks(mk({ vol_ratio: 0.5 }), 1_000_000)).toContain("出来高が細い");
+  });
+  it("決算近接（earningsWarning 経由）", () => {
+    expect(planRisks(mk({ days_to_earnings: 3 }), 1_000_000)).toContain("3日後に決算");
+  });
+  it("薄商い（liquidityWarning 経由）", () => {
+    expect(planRisks(mk({ avg_turnover: 50_000_000 }), 1_000_000)).toContain("薄商い（約定しづらい）");
+  });
+  it("データ異常（dataHealthWarnings 経由）", () => {
+    const r = planRisks(mk({ data_health: JSON.stringify({ zero_volume_days: 2 }) }), 1_000_000);
+    expect(r).toContain("出来高0の日が2日");
+  });
+  it("損切りダウンサイド（riskSummary 経由・金額と口座%）", () => {
+    const r = planRisks(mk({ shares: 100, risk_amount: 12_000, limit_price: 3000 }), 1_000_000);
+    expect(r).toContain("損切り到達で約 −¥12,000（口座の1.2%）");
+  });
+  it("複合時の順序＝戦略→イベント→金額", () => {
+    const r = planRisks(mk({
+      weekly_trend: "down", regime: "risk_off", confidence: 20, vol_ratio: 0.5,
+      days_to_earnings: 3, avg_turnover: 50_000_000,
+      data_health: JSON.stringify({ zero_volume_days: 2 }),
+      shares: 100, risk_amount: 12_000, limit_price: 3000,
+    }), 1_000_000);
+    expect(r).toEqual([
+      "週足が逆行（down）",
+      "地合いが弱い（リスクオフ）",
+      "確信度が低め",
+      "出来高が細い",
+      "3日後に決算",
+      "薄商い（約定しづらい）",
+      "出来高0の日が2日",
+      "損切り到達で約 −¥12,000（口座の1.2%）",
+    ]);
   });
 });
 
