@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS daily_plan (
   result_r      REAL,
   days_held     INTEGER,
   resolved_date TEXT,
+  avg_turnover  REAL,
+  data_health   TEXT,
   created_at    TEXT DEFAULT (datetime('now')),
   UNIQUE (ticker, plan_date)
 );
@@ -151,7 +153,8 @@ def _migrate_daily_plan(conn):
                       ("shares", "REAL"), ("risk_amount", "REAL"),
                       ("days_to_earnings", "INTEGER"), ("regime", "TEXT"),
                       ("fill_status", "TEXT"), ("outcome", "TEXT"), ("exit_price", "REAL"),
-                      ("result_r", "REAL"), ("days_held", "INTEGER"), ("resolved_date", "TEXT")):
+                      ("result_r", "REAL"), ("days_held", "INTEGER"), ("resolved_date", "TEXT"),
+                      ("avg_turnover", "REAL"), ("data_health", "TEXT")):
         if col not in cols:
             conn.execute(f"ALTER TABLE daily_plan ADD COLUMN {col} {decl}")
 
@@ -485,17 +488,19 @@ def upsert_plan(row: dict):
     """1銘柄分の作戦を (ticker, plan_date) で upsert。"""
     row = {**row}
     for k in ("ai_summary", "ai_confidence", "ai_risks", "confidence", "shares",
-              "risk_amount", "days_to_earnings", "regime"):
+              "risk_amount", "days_to_earnings", "regime", "avg_turnover", "data_health"):
         row.setdefault(k, None)
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO daily_plan "
             "(ticker, plan_date, direction, score, vol_ratio, weekly_trend, "
             " limit_price, stop_price, target_price, rationale, confidence, "
-            " shares, risk_amount, days_to_earnings, regime, ai_summary, ai_confidence, ai_risks) "
+            " shares, risk_amount, days_to_earnings, regime, ai_summary, ai_confidence, ai_risks, "
+            " avg_turnover, data_health) "
             "VALUES (:ticker, :plan_date, :direction, :score, :vol_ratio, :weekly_trend, "
             " :limit_price, :stop_price, :target_price, :rationale, :confidence, "
-            " :shares, :risk_amount, :days_to_earnings, :regime, :ai_summary, :ai_confidence, :ai_risks) "
+            " :shares, :risk_amount, :days_to_earnings, :regime, :ai_summary, :ai_confidence, :ai_risks, "
+            " :avg_turnover, :data_health) "
             "ON CONFLICT(ticker, plan_date) DO UPDATE SET "
             "direction=excluded.direction, score=excluded.score, vol_ratio=excluded.vol_ratio, "
             "weekly_trend=excluded.weekly_trend, limit_price=excluded.limit_price, "
@@ -506,6 +511,7 @@ def upsert_plan(row: dict):
             "regime=COALESCE(excluded.regime, daily_plan.regime), "
             "ai_summary=excluded.ai_summary, "
             "ai_confidence=excluded.ai_confidence, ai_risks=excluded.ai_risks, "
+            "avg_turnover=excluded.avg_turnover, data_health=excluded.data_health, "
             "created_at=datetime('now')",
             row)
 

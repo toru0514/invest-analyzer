@@ -484,6 +484,39 @@ def test_migrate_entry_method_is_one_shot(tmp_path, monkeypatch):
     assert atr2["params"]["entry_atr_mult"] == 0.5
 
 
+def test_daily_plan_liquidity_column_migration(tmp_path, monkeypatch):
+    """既存 daily_plan に avg_turnover/data_health が無くても冪等マイグレーションで追加され、upsert で値が入る。"""
+    import sqlite3
+    import db as dbmod
+    dbfile = tmp_path / "old_liq.db"
+    conn = sqlite3.connect(dbfile)
+    # 打ち手11 相当（結果列まで・avg_turnover/data_health 無し）の旧スキーマ
+    conn.execute(
+        "CREATE TABLE daily_plan (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "ticker TEXT NOT NULL, plan_date TEXT NOT NULL, direction TEXT, score INTEGER, "
+        "vol_ratio REAL, weekly_trend TEXT, limit_price REAL, stop_price REAL, "
+        "target_price REAL, rationale TEXT, confidence REAL, shares REAL, risk_amount REAL, "
+        "days_to_earnings INTEGER, ai_summary TEXT, ai_confidence INTEGER, ai_risks TEXT, "
+        "regime TEXT, fill_status TEXT, outcome TEXT, exit_price REAL, result_r REAL, "
+        "days_held INTEGER, resolved_date TEXT, created_at TEXT, UNIQUE(ticker, plan_date))")
+    conn.commit(); conn.close()
+
+    monkeypatch.setattr(dbmod, "DB_PATH", str(dbfile))
+    dbmod.init_db()
+    with dbmod.get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(daily_plan)")}
+    assert "avg_turnover" in cols and "data_health" in cols
+    dbmod.upsert_plan({"ticker": "L.T", "plan_date": "2026-06-01", "direction": "buy",
+                       "score": 3, "vol_ratio": None, "weekly_trend": None,
+                       "limit_price": 1000.0, "stop_price": 950.0, "target_price": 1100.0,
+                       "rationale": "x", "avg_turnover": 50_000_000.0,
+                       "data_health": '{"zero_volume_days":1,"gap_days":0,"spike_days":0}'})
+    row = [r for r in dbmod.list_plan("2026-06-01") if r["ticker"] == "L.T"][0]
+    assert row["avg_turnover"] == 50_000_000.0
+    assert row["data_health"] == '{"zero_volume_days":1,"gap_days":0,"spike_days":0}'
+    dbmod.init_db()   # 冪等（再実行で例外なし）
+
+
 def test_daily_plan_outcome_columns_and_regime(tmp_path, monkeypatch):
     """daily_plan に結果列が冪等追加され、upsert_plan が regime を保存（打ち手11）。"""
     import db as dbmod
