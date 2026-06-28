@@ -13,6 +13,8 @@ from holidays_jp import MARKET_HOLIDAYS
 
 # 連続欠損のしきい値: 祝日対応の取引日距離 >= 2（＝1取引日以上の欠損）。
 _GAP_BDAYS = 2
+# 祝日対応の営業日カレンダーは静的ゆえ一度だけ構築（perform_refresh の銘柄ループで再構築しない）。
+_MARKET_CAL = np.busdaycalendar(holidays=sorted(MARKET_HOLIDAYS))
 
 
 def average_turnover(df, window: int = 20) -> float | None:
@@ -52,15 +54,18 @@ def data_health(df, window: int = 20, spike_pct: float = 0.5) -> dict:
             out["zero_volume_days"] = int(((vol <= 0) | vol.isna()).sum())
 
         # 異常スパイク（|日次変化率| > spike_pct）
+        # 注: NaN close は前後2本のリターンが落ちるため、NaN を挟むスパイクは過少計上（best-effort 契約）。
         rets = recent["close"].astype(float).pct_change().dropna()
         out["spike_days"] = int((rets.abs() > spike_pct).sum())
 
         # 連続欠損（祝日対応の取引日距離 >= _GAP_BDAYS）
         dates = recent.index[-window:]
         if len(dates) >= 2:
-            cal = np.busdaycalendar(holidays=sorted(MARKET_HOLIDAYS))
+            # tz-aware index は .values で UTC 変換され日付がズレるため、壁時計時刻を保って tz を外す
+            if dates.tz is not None:
+                dates = dates.tz_localize(None)
             d = dates.normalize().values.astype("datetime64[D]")   # np.busday_count は datetime64[D] 必須
-            gaps = np.busday_count(d[:-1], d[1:], busdaycal=cal)
+            gaps = np.busday_count(d[:-1], d[1:], busdaycal=_MARKET_CAL)
             out["gap_days"] = int((gaps >= _GAP_BDAYS).sum())
 
         return out

@@ -96,3 +96,20 @@ def test_data_health_garbage_returns_zero():
     assert dq.data_health(None) == _ZERO
     assert dq.data_health(pd.DataFrame()) == _ZERO
     assert dq.data_health(_df([100.0] * 5, [1_000_000] * 5).drop(columns=["close"])) == _ZERO
+
+
+def test_data_health_nan_close_does_not_raise():
+    """NaN close でも例外を投げず dict を返す（カウントは best-effort）。"""
+    closes = [100.0, float("nan"), 300.0] + [100.0] * 22
+    df = _df(closes, [1_000_000] * 25)
+    result = dq.data_health(df)
+    assert isinstance(result, dict)
+    assert set(result) == {"zero_volume_days", "gap_days", "spike_days"}
+
+
+def test_data_health_tz_aware_index_no_false_gap():
+    """tz-aware（Asia/Tokyo）の連続営業日でも gap を誤検知しない（tz 剥がしの回帰）。"""
+    biz = _trading_days(20)
+    df = _df([100.0 + i * 0.1 for i in range(20)], [1_000_000] * 20,
+             dates=biz.tz_localize("Asia/Tokyo"))
+    assert dq.data_health(df, window=20)["gap_days"] == 0
