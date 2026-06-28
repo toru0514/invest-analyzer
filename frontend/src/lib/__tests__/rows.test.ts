@@ -136,3 +136,21 @@ describe("liquidityWarning", () => {
     expect(liquidityWarning(null)).toBeNull();
   });
 });
+
+describe("dataHealthWarnings", () => {
+  it("各カウント>0 を文言化（順序: 出来高0→欠損→スパイク）", () => {
+    const j = JSON.stringify({ zero_volume_days: 2, gap_days: 1, spike_days: 3 });
+    expect(dataHealthWarnings(j)).toEqual([
+      "出来高0の日が2日",
+      "データ欠損 1件",
+      "異常な値動き 3件（データ要確認）",
+    ]);
+  });
+  it("全0は空配列", () => {
+    expect(dataHealthWarnings(JSON.stringify({ zero_volume_days: 0, gap_days: 0, spike_days: 0 }))).toEqual([]);
+  });
+  it("null・壊れJSONは空配列", () => {
+    expect(dataHealthWarnings(null)).toEqual([]);
+    expect(dataHealthWarnings("{not json")).toEqual([]);
+  });
+});

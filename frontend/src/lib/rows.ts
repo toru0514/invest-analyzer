@@ -114,3 +114,21 @@ export function liquidityWarning(
   if (avgTurnover == null || avgTurnover >= threshold) return null;
   return { turnover: avgTurnover };
 }
+
+/** data_health（JSON文字列）を人間可読な注意文の配列に。null/健全/壊れJSON は []。
+ *  ai_risks と同様、生データをフロントで表示用に整形する（しきい値はカウント>0）。 */
+export function dataHealthWarnings(json: string | null): string[] {
+  if (!json) return [];
+  let h: { zero_volume_days?: number; gap_days?: number; spike_days?: number };
+  try {
+    h = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!h || typeof h !== "object") return [];
+  const out: string[] = [];
+  if ((h.zero_volume_days ?? 0) > 0) out.push(`出来高0の日が${h.zero_volume_days}日`);
+  if ((h.gap_days ?? 0) > 0) out.push(`データ欠損 ${h.gap_days}件`);
+  if ((h.spike_days ?? 0) > 0) out.push(`異常な値動き ${h.spike_days}件（データ要確認）`);
+  return out;
+}
