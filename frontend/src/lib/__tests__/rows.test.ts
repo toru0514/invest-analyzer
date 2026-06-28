@@ -154,3 +154,16 @@ describe("dataHealthWarnings", () => {
     expect(dataHealthWarnings("{not json")).toEqual([]);
   });
 });
+
+describe("selectTopN 薄商い除外", () => {
+  const mk = (ticker: string, confidence: number, avg_turnover: number | null) =>
+    ({ ticker, direction: "buy" as const, score: 3, confidence, avg_turnover });
+  it("薄商い（閾値未満）を推奨から除外し、流動的は残す", () => {
+    const rows = [mk("A", 80, 5_000_000), mk("B", 70, 500_000_000)];
+    expect(selectTopN(rows, 3).map((r) => r.ticker)).toEqual(["B"]);
+  });
+  it("avg_turnover が null は除外しない（後方互換・confidence とは非対称）", () => {
+    const rows = [mk("A", 80, null)];
+    expect(selectTopN(rows, 3).map((r) => r.ticker)).toEqual(["A"]);
+  });
+});

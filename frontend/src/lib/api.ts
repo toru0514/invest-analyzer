@@ -79,6 +79,8 @@ export type PlanRow = {
   rationale: string | null;
   confidence: number | null;
   days_to_earnings: number | null;
+  avg_turnover: number | null;   // 平均売買代金（円・直近20日）。打ち手12
+  data_health: string | null;    // JSON: {zero_volume_days,gap_days,spike_days}。健全/旧行は null
   ai_summary: string | null;
   ai_confidence: number | null;
   ai_risks: string | null; // JSON文字列化された string[]

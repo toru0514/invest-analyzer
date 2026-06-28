@@ -43,7 +43,7 @@ export function mergeRows(
 
 // 作戦ボード Top N（打ち手6）。confidence 降順 → |score| 降順 → ticker 昇順の決定論順。
 // confidence=null は移行前の旧 plan 行のみで生じうる（新規生成行は常に数値）。?? -1 で最下位に置く。
-type Rankable = { ticker: string; direction: Direction; score: number; confidence: number | null };
+type Rankable = { ticker: string; direction: Direction; score: number; confidence: number | null; avg_turnover?: number | null };
 
 export function rankByConfidence<T extends Rankable>(rows: T[]): T[] {
   return [...rows]
@@ -58,8 +58,14 @@ export function rankByConfidence<T extends Rankable>(rows: T[]): T[] {
 
 // 「今夜の推奨」は正の量的確信度を持つ actionable のみを採る。confidence が 0/null
 // （＝整数scoreはbuy/sellでも連続確信度が確信なし）の行は推奨に載せない。
+// avg_turnover が既知かつ閾値未満の薄商い銘柄も除外する（null=不明は除外しない）。
 export function selectTopN<T extends Rankable>(rows: T[], n: number): T[] {
-  return n <= 0 ? [] : rankByConfidence(rows).filter((r) => (r.confidence ?? 0) > 0).slice(0, n);
+  return n <= 0
+    ? []
+    : rankByConfidence(rows)
+        .filter((r) => (r.confidence ?? 0) > 0)
+        .filter((r) => r.avg_turnover == null || r.avg_turnover >= LIQUIDITY_MIN_YEN)
+        .slice(0, n);
 }
 
 // 作戦カードのサイジング表示（打ち手8）。サイジングが無い（旧行/非buy）か entry 価格が無いなら null。
