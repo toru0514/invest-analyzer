@@ -432,7 +432,7 @@ Expected: PASS
 - [ ] **Step 5: backend 全体の回帰**
 
 Run: `backend/venv/bin/python -m pytest backend/ -q`
-Expected: 全 PASS（166 + 新規6[data_quality] + 2[api] ≈ 174 件）。落ちたら修正してから次へ。
+Expected: 全 PASS（166 + 新規12[data_quality] + 2[api] ≈ 180 件）。落ちたら修正してから次へ。
 
 - [ ] **Step 6: コミット**
 
