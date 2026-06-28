@@ -150,6 +150,17 @@ export type BacktestResult = {
   failed?: string[];
 };
 
+export type PerfRow = {
+  type: string;
+  n_plans: number;
+  n_filled: number;
+  fill_rate: number | null;   // 0..1
+  n_resolved: number;
+  win_rate: number | null;    // 0..100
+  avg_r: number | null;       // 建玉リスク1単位あたり損益（期待値R）
+  avg_days: number | null;
+};
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -215,4 +226,6 @@ export const api = {
     req<unknown>("/holdings", { method: "PUT", body: JSON.stringify(b) }),
   deleteHolding: (ticker: string) =>
     req<{ deleted: string }>(`/holdings/${encodeURIComponent(ticker)}`, { method: "DELETE" }),
+
+  getPerformance: () => req<{ summary: PerfRow[] }>("/performance"),
 };

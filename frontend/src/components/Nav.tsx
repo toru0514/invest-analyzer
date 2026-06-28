@@ -6,6 +6,7 @@ const links = [
   { href: "/settings", label: "設定" },
   { href: "/simulation", label: "シミュレーション" },
   { href: "/optimize", label: "最適化" },
+  { href: "/performance", label: "成績" },
 ];
 
 export default function Nav() {
