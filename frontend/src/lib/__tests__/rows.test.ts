@@ -219,6 +219,13 @@ describe("planRationale", () => {
     });
     expect(s).toBe("上昇トレンドの押し目買い。出来高1.5倍が後押し。");
   });
+  it("出来高の末尾0は落とす（2.0→2倍）", () => {
+    const s = planRationale({
+      direction: "buy", weekly_trend: "up", regime: null,
+      vol_ratio: 2.0, confidence: null,
+    });
+    expect(s).toBe("上昇トレンドの押し目買い。出来高2倍が後押し。");
+  });
   it("neutral は null", () => {
     expect(planRationale({
       direction: "neutral", weekly_trend: "up", regime: "risk_on",
@@ -243,8 +250,11 @@ describe("planRisks", () => {
   it("neutral は空配列", () => {
     expect(planRisks(mk({ direction: "neutral" }), 1_000_000)).toEqual([]);
   });
-  it("週足逆行（buy×down）を出す", () => {
-    expect(planRisks(mk({ weekly_trend: "down" }), 1_000_000)).toContain("週足が逆行（down）");
+  it("週足逆行（buy×down）を日本語語彙で出す", () => {
+    expect(planRisks(mk({ weekly_trend: "down" }), 1_000_000)).toContain("週足が逆行（下降）");
+  });
+  it("週足逆行（sell×up）も日本語語彙で出す", () => {
+    expect(planRisks(mk({ direction: "sell", weekly_trend: "up" }), 1_000_000)).toContain("週足が逆行（上昇）");
   });
   it("地合いリスクオフを出す", () => {
     expect(planRisks(mk({ regime: "risk_off" }), 1_000_000)).toContain("地合いが弱い（リスクオフ）");
@@ -280,7 +290,7 @@ describe("planRisks", () => {
       shares: 100, risk_amount: 12_000, limit_price: 3000,
     }), 1_000_000);
     expect(r).toEqual([
-      "週足が逆行（down）",
+      "週足が逆行（下降）",
       "地合いが弱い（リスクオフ）",
       "確信度が低め",
       "出来高が細い",

@@ -224,7 +224,8 @@ export function planRisks(
     (row.direction === "buy" && row.weekly_trend === "down") ||
     (row.direction === "sell" && row.weekly_trend === "up")
   ) {
-    out.push(`週足が逆行（${row.weekly_trend}）`);
+    // ヘッダの週足表示（TREND_LABEL）と語彙を揃える（英語トークンを出さない）。
+    out.push(`週足が逆行（${row.weekly_trend === "down" ? "下降" : "上昇"}）`);
   }
   if (row.regime === "risk_off") out.push("地合いが弱い（リスクオフ）");
   if (confidenceTier(row.confidence) === "low") out.push("確信度が低め");
