@@ -229,7 +229,7 @@ function PlanCard({
           return lw ? (
             <span className="rounded bg-amber-600 px-1.5 py-0.5 text-xs font-semibold text-white"
                   title="薄商い：提案指値は約定しづらく滑りやすい（今夜の推奨からは除外）">
-              ⚠ 薄商い 売買代金 約{Math.round(lw.turnover / 1e6).toLocaleString()}百万円/日
+              ⚠ 薄商い 売買代金 約{Math.floor(lw.turnover / 1e6).toLocaleString()}百万円/日
             </span>
           ) : null;
         })()}
