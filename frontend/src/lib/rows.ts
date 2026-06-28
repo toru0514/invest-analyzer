@@ -138,3 +138,17 @@ export function dataHealthWarnings(json: string | null): string[] {
   if ((h.spike_days ?? 0) > 0) out.push(`異常な値動き ${h.spike_days}件（データ要確認）`);
   return out;
 }
+
+/** 確信度（打ち手6・0-100）の語感ティア。バッジが数値、根拠文が語感で補完する。
+ *  打ち手6 の confidence は低位圧縮分布のため high=60 / mid=35（フロント定数・再生成不要で調整可）。 */
+export const CONF_HIGH = 60;
+export const CONF_MID = 35;
+
+export function confidenceTier(
+  confidence: number | null,
+): "high" | "mid" | "low" | null {
+  if (confidence == null) return null;
+  if (confidence >= CONF_HIGH) return "high";
+  if (confidence >= CONF_MID) return "mid";
+  return "low";
+}

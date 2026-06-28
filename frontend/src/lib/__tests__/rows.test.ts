@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeRows, applyRefresh, selectTopN, riskSummary, earningsWarning, liquidityWarning, dataHealthWarnings, LIQUIDITY_MIN_YEN, Row } from "@/lib/rows";
+import { mergeRows, applyRefresh, selectTopN, riskSummary, earningsWarning, liquidityWarning, dataHealthWarnings, LIQUIDITY_MIN_YEN, Row, confidenceTier } from "@/lib/rows";
 import { RefreshRow, Signal, WatchItem } from "@/lib/api";
 
 const watch: WatchItem[] = [
@@ -158,6 +158,20 @@ describe("dataHealthWarnings", () => {
     expect(dataHealthWarnings("{not json")).toEqual([]);
     expect(dataHealthWarnings("[]")).toEqual([]);   // valid JSON, wrong type
     expect(dataHealthWarnings("42")).toEqual([]);   // primitive
+  });
+});
+
+describe("confidenceTier", () => {
+  it("しきい値で high/mid/low に分ける（境界は以上）", () => {
+    expect(confidenceTier(60)).toBe("high");
+    expect(confidenceTier(100)).toBe("high");
+    expect(confidenceTier(59)).toBe("mid");
+    expect(confidenceTier(35)).toBe("mid");
+    expect(confidenceTier(34)).toBe("low");
+    expect(confidenceTier(0)).toBe("low");
+  });
+  it("null は null", () => {
+    expect(confidenceTier(null)).toBeNull();
   });
 });
 
