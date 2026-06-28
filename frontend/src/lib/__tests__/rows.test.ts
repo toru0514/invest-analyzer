@@ -135,6 +135,10 @@ describe("liquidityWarning", () => {
   it("null（不明・旧行）は警告しない", () => {
     expect(liquidityWarning(null)).toBeNull();
   });
+  it("カスタムしきい値を使える", () => {
+    expect(liquidityWarning(50_000_000, 40_000_000)).toBeNull();          // 50M >= 40M → null
+    expect(liquidityWarning(30_000_000, 40_000_000)).toEqual({ turnover: 30_000_000 });
+  });
 });
 
 describe("dataHealthWarnings", () => {
@@ -149,9 +153,11 @@ describe("dataHealthWarnings", () => {
   it("全0は空配列", () => {
     expect(dataHealthWarnings(JSON.stringify({ zero_volume_days: 0, gap_days: 0, spike_days: 0 }))).toEqual([]);
   });
-  it("null・壊れJSONは空配列", () => {
+  it("null・壊れJSON・非オブジェクトは空配列", () => {
     expect(dataHealthWarnings(null)).toEqual([]);
     expect(dataHealthWarnings("{not json")).toEqual([]);
+    expect(dataHealthWarnings("[]")).toEqual([]);   // valid JSON, wrong type
+    expect(dataHealthWarnings("42")).toEqual([]);   // primitive
   });
 });
 

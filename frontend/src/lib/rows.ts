@@ -41,6 +41,10 @@ export function mergeRows(
   });
 }
 
+/** 薄商い警告のしきい値（円・平均売買代金/日）。1億円未満を「実約定に難あり」とみなす。
+ *  ※ 個人の実約定可能性の目安。設定化は将来。決算の EARNINGS_WARN_DAYS と同型のフロント定数。 */
+export const LIQUIDITY_MIN_YEN = 100_000_000;
+
 // 作戦ボード Top N（打ち手6）。confidence 降順 → |score| 降順 → ticker 昇順の決定論順。
 // confidence=null は移行前の旧 plan 行のみで生じうる（新規生成行は常に数値）。?? -1 で最下位に置く。
 type Rankable = { ticker: string; direction: Direction; score: number; confidence: number | null; avg_turnover?: number | null };
@@ -107,10 +111,6 @@ export function earningsWarning(
   return { days: daysToEarnings };
 }
 
-/** 薄商い警告のしきい値（円・平均売買代金/日）。1億円未満を「実約定に難あり」とみなす。
- *  ※ 個人の実約定可能性の目安。設定化は将来。決算の EARNINGS_WARN_DAYS と同型のフロント定数。 */
-export const LIQUIDITY_MIN_YEN = 100_000_000;
-
 /** 平均売買代金がしきい値未満なら {turnover} を返す純関数（それ以外 null）。
  *  null（不明・旧行）は警告しない＝「不明=非干渉」。 */
 export function liquidityWarning(
@@ -131,7 +131,7 @@ export function dataHealthWarnings(json: string | null): string[] {
   } catch {
     return [];
   }
-  if (!h || typeof h !== "object") return [];
+  if (!h || typeof h !== "object" || Array.isArray(h)) return [];
   const out: string[] = [];
   if ((h.zero_volume_days ?? 0) > 0) out.push(`出来高0の日が${h.zero_volume_days}日`);
   if ((h.gap_days ?? 0) > 0) out.push(`データ欠損 ${h.gap_days}件`);
