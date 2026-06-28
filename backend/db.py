@@ -98,6 +98,13 @@ CREATE TABLE IF NOT EXISTS daily_plan (
   ai_summary    TEXT,
   ai_confidence INTEGER,
   ai_risks      TEXT,
+  regime        TEXT,
+  fill_status   TEXT,
+  outcome       TEXT,
+  exit_price    REAL,
+  result_r      REAL,
+  days_held     INTEGER,
+  resolved_date TEXT,
   created_at    TEXT DEFAULT (datetime('now')),
   UNIQUE (ticker, plan_date)
 );
@@ -142,7 +149,9 @@ def _migrate_daily_plan(conn):
     for col, decl in (("ai_summary", "TEXT"), ("ai_confidence", "INTEGER"),
                       ("ai_risks", "TEXT"), ("confidence", "REAL"),
                       ("shares", "REAL"), ("risk_amount", "REAL"),
-                      ("days_to_earnings", "INTEGER")):
+                      ("days_to_earnings", "INTEGER"), ("regime", "TEXT"),
+                      ("fill_status", "TEXT"), ("outcome", "TEXT"), ("exit_price", "REAL"),
+                      ("result_r", "REAL"), ("days_held", "INTEGER"), ("resolved_date", "TEXT")):
         if col not in cols:
             conn.execute(f"ALTER TABLE daily_plan ADD COLUMN {col} {decl}")
 
@@ -476,24 +485,24 @@ def upsert_plan(row: dict):
     """1銘柄分の作戦を (ticker, plan_date) で upsert。"""
     row = {**row}
     for k in ("ai_summary", "ai_confidence", "ai_risks", "confidence", "shares",
-              "risk_amount", "days_to_earnings"):
+              "risk_amount", "days_to_earnings", "regime"):
         row.setdefault(k, None)
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO daily_plan "
             "(ticker, plan_date, direction, score, vol_ratio, weekly_trend, "
             " limit_price, stop_price, target_price, rationale, confidence, "
-            " shares, risk_amount, days_to_earnings, ai_summary, ai_confidence, ai_risks) "
+            " shares, risk_amount, days_to_earnings, regime, ai_summary, ai_confidence, ai_risks) "
             "VALUES (:ticker, :plan_date, :direction, :score, :vol_ratio, :weekly_trend, "
             " :limit_price, :stop_price, :target_price, :rationale, :confidence, "
-            " :shares, :risk_amount, :days_to_earnings, :ai_summary, :ai_confidence, :ai_risks) "
+            " :shares, :risk_amount, :days_to_earnings, :regime, :ai_summary, :ai_confidence, :ai_risks) "
             "ON CONFLICT(ticker, plan_date) DO UPDATE SET "
             "direction=excluded.direction, score=excluded.score, vol_ratio=excluded.vol_ratio, "
             "weekly_trend=excluded.weekly_trend, limit_price=excluded.limit_price, "
             "stop_price=excluded.stop_price, target_price=excluded.target_price, "
             "rationale=excluded.rationale, confidence=excluded.confidence, "
             "shares=excluded.shares, risk_amount=excluded.risk_amount, "
-            "days_to_earnings=excluded.days_to_earnings, "
+            "days_to_earnings=excluded.days_to_earnings, regime=excluded.regime, "
             "ai_summary=excluded.ai_summary, "
             "ai_confidence=excluded.ai_confidence, ai_risks=excluded.ai_risks, "
             "created_at=datetime('now')",

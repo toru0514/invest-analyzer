@@ -484,6 +484,24 @@ def test_migrate_entry_method_is_one_shot(tmp_path, monkeypatch):
     assert atr2["params"]["entry_atr_mult"] == 0.5
 
 
+def test_daily_plan_outcome_columns_and_regime(tmp_path, monkeypatch):
+    """daily_plan に結果列が冪等追加され、upsert_plan が regime を保存（打ち手11）。"""
+    import db as dbmod
+    monkeypatch.setattr(dbmod, "DB_PATH", str(tmp_path / "tracking.db"))
+    dbmod.init_db()
+    with dbmod.get_conn() as c:
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(daily_plan)").fetchall()}
+    for col in ("regime", "fill_status", "outcome", "exit_price", "result_r", "days_held", "resolved_date"):
+        assert col in cols
+    dbmod.upsert_plan({"ticker": "7203.T", "plan_date": "2026-06-30", "direction": "buy",
+                       "score": 3, "vol_ratio": None, "weekly_trend": None, "rationale": None,
+                       "limit_price": 100.0, "stop_price": 90.0, "target_price": 140.0,
+                       "regime": "risk_on"})
+    row = [p for p in dbmod.list_plan("2026-06-30") if p["ticker"] == "7203.T"][0]
+    assert row["regime"] == "risk_on"
+    dbmod.init_db()   # 冪等（再実行で例外なし）
+
+
 def test_plan_has_risk_sizing_for_buy(client):
     """null 経路の不変条件: 全 plan 行に shares/risk_amount キーが存在し、非 buy 行は None。
     （buy 経路の実サイジングは test_perform_refresh_sizes_buy_end_to_end が担保）"""
