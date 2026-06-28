@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, Holding, PlanRow, WatchItem } from "@/lib/api";
-import { dataHealthWarnings, earningsWarning, liquidityWarning, riskSummary, selectTopN } from "@/lib/rows";
+import { dataHealthWarnings, earningsWarning, liquidityWarning, planRationale, planRisks, riskSummary, selectTopN } from "@/lib/rows";
 import DirectionBadge from "@/components/DirectionBadge";
 import Disclaimer from "@/components/Disclaimer";
 import StockAddSearch from "@/components/StockAddSearch";
@@ -270,7 +270,19 @@ function PlanCard({
               </p>
             ) : null;
           })()}
-          {row!.rationale && <p className="mt-2 text-xs text-slate-500">根拠: {row!.rationale}</p>}
+          {(() => {
+            const r = planRationale(row!);
+            return r ? <p className="mt-2 text-xs font-medium text-slate-700">根拠: {r}</p> : null;
+          })()}
+          {(() => {
+            const risks = planRisks(row!, accountSize);
+            return risks.length ? (
+              <p className="mt-1 text-xs text-amber-700">リスク: {risks.join("・")}</p>
+            ) : null;
+          })()}
+          {row!.rationale && (
+            <p className="mt-1 text-[10px] text-slate-400">指値の根拠: {row!.rationale}</p>
+          )}
         </>
       ) : holding && row && row.target_price != null ? (
         <>
