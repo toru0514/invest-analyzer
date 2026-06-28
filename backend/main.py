@@ -20,6 +20,7 @@ import stocks_jp
 from ai_commentary import generate_commentary
 from backtest import run_backtest
 from costs import cost_from_configs
+from data_quality import average_turnover, data_health
 from evaluation import benchmark, evaluate_holdout, summary_stats
 from market import fetch_earnings_dates, fetch_earnings_days, fetch_name, get_history
 from scheduler import DailyScheduler
@@ -404,6 +405,8 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
             failed.append(ticker)
             continue
         db.upsert_prices(ticker, df)
+        turnover = average_turnover(df)
+        health = data_health(df)
 
         ticker_cfgs = resolve_configs(common, [c for c in all_configs if c["ticker"] == ticker])
         rs_strength = (relative_strength(df, idx_df, int(rs_params.get("period", 20)),
@@ -454,6 +457,8 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
             "confidence": detail.get("confidence"),
             "shares": plan_shares, "risk_amount": plan_risk,
             "days_to_earnings": days_to_earnings, "regime": regime,
+            "avg_turnover": turnover,
+            "data_health": json.dumps(health) if any(health.values()) else None,
             "ai_summary": commentary["summary"] if commentary else None,
             "ai_confidence": commentary["confidence"] if commentary else None,
             "ai_risks": json.dumps(commentary["risks"], ensure_ascii=False) if commentary else None,

@@ -659,6 +659,17 @@ def test_perform_refresh_persists_days_to_earnings(client, monkeypatch):
                 client.delete(f"/watchlist/{w['id']}")
 
 
+def test_perform_refresh_persists_liquidity(client):
+    """perform_refresh(demo) が avg_turnover を daily_plan に永続化する（純算出ゆえ demo でも出る）。"""
+    client.post("/plan/generate?demo=true")
+    rows = client.get("/plan").json()["rows"]
+    assert rows
+    # 合成データは出来高1M〜8M・価格〜2500 ＝ 売買代金は十分（数値・正）
+    assert all(r["avg_turnover"] is not None and r["avg_turnover"] > 0 for r in rows)
+    # data_health キーが必ず存在する（健全なら None）
+    assert all("data_health" in r for r in rows)
+
+
 def test_backtest_accepts_exit_params(client):
     r = client.post("/backtest", json={"demo": True, "days": 40, "exit_mode": "plan",
                                        "trail_atr_mult": 3.0, "max_hold_days": 10})
