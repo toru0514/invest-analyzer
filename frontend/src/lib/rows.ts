@@ -152,3 +152,44 @@ export function confidenceTier(
   if (confidence >= CONF_MID) return "mid";
   return "low";
 }
+
+const TIER_WORD: Record<"high" | "mid" | "low", string> = {
+  high: "高め", mid: "中程度", low: "低め",
+};
+
+/** 型ラベル（順張り/逆張り）。direction × weekly_trend の2軸で決める（regime は使わない）。 */
+function planTypeLabel(direction: Direction, weekly: string | null): string {
+  if (direction === "buy") {
+    if (weekly === "up") return "上昇トレンドの押し目買い";
+    if (weekly === "flat") return "横ばいでの反発狙い";
+    if (weekly === "down") return "下落局面での逆張り（反発狙い）";
+    return "押し目買い";
+  }
+  if (weekly === "down") return "下降トレンドの戻り売り";
+  if (weekly === "up") return "上昇中の戻り売り（逆張り）";
+  if (weekly === "flat") return "横ばいでの戻り売り";
+  return "戻り売り";
+}
+
+/** 作戦カードの自然文「根拠」。actionable（buy/sell）のみ。neutral は null。
+ *  型ラベル＋後押し要因（地合い・出来高）＋確信度の語感を1文に。確信度は打ち手6 を再利用（再計算しない）。 */
+export function planRationale(row: {
+  direction: Direction;
+  weekly_trend: "up" | "down" | "flat" | null;
+  regime: "risk_on" | "neutral" | "risk_off" | null;
+  vol_ratio: number | null;
+  confidence: number | null;
+}): string | null {
+  if (row.direction === "neutral") return null;
+  const drivers: string[] = [];
+  if (row.regime === "risk_on") drivers.push("地合い良好");
+  else if (row.regime === "neutral") drivers.push("地合い中立");
+  if (row.vol_ratio != null && row.vol_ratio >= 1.5) {
+    drivers.push(`出来高${Number(row.vol_ratio.toFixed(1))}倍が後押し`);
+  }
+  const tier = confidenceTier(row.confidence);
+  const parts = [planTypeLabel(row.direction, row.weekly_trend)];
+  if (drivers.length) parts.push(drivers.join("・"));
+  if (tier) parts.push(`確信度は${TIER_WORD[tier]}`);
+  return parts.join("。") + "。";
+}

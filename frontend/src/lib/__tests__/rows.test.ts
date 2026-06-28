@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeRows, applyRefresh, selectTopN, riskSummary, earningsWarning, liquidityWarning, dataHealthWarnings, LIQUIDITY_MIN_YEN, Row, confidenceTier } from "@/lib/rows";
+import { mergeRows, applyRefresh, selectTopN, riskSummary, earningsWarning, liquidityWarning, dataHealthWarnings, LIQUIDITY_MIN_YEN, Row, confidenceTier, planRationale } from "@/lib/rows";
 import { RefreshRow, Signal, WatchItem } from "@/lib/api";
 
 const watch: WatchItem[] = [
@@ -172,6 +172,43 @@ describe("confidenceTier", () => {
   });
   it("null は null", () => {
     expect(confidenceTier(null)).toBeNull();
+  });
+});
+
+describe("planRationale", () => {
+  it("buy×週足up×risk_on×出来高1.8×高確信 → 型＋後押し＋確信度語感", () => {
+    const s = planRationale({
+      direction: "buy", weekly_trend: "up", regime: "risk_on",
+      vol_ratio: 1.8, confidence: 72,
+    });
+    expect(s).toBe("上昇トレンドの押し目買い。地合い良好・出来高1.8倍が後押し。確信度は高め。");
+  });
+  it("buy×週足down×risk_off → 逆張り型・後押しに地合いを入れない", () => {
+    const s = planRationale({
+      direction: "buy", weekly_trend: "down", regime: "risk_off",
+      vol_ratio: 1.0, confidence: 50,
+    });
+    expect(s).toBe("下落局面での逆張り（反発狙い）。確信度は中程度。");
+  });
+  it("sell×週足up → 上昇中の戻り売り（逆張り）", () => {
+    const s = planRationale({
+      direction: "sell", weekly_trend: "up", regime: "neutral",
+      vol_ratio: null, confidence: 20,
+    });
+    expect(s).toBe("上昇中の戻り売り（逆張り）。地合い中立。確信度は低め。");
+  });
+  it("週足 null は型ラベルを汎用名に", () => {
+    const s = planRationale({
+      direction: "buy", weekly_trend: null, regime: null,
+      vol_ratio: null, confidence: null,
+    });
+    expect(s).toBe("押し目買い。");
+  });
+  it("neutral は null", () => {
+    expect(planRationale({
+      direction: "neutral", weekly_trend: "up", regime: "risk_on",
+      vol_ratio: 2, confidence: 80,
+    })).toBeNull();
   });
 });
 
