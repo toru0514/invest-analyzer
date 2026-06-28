@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeRows, applyRefresh, selectTopN, riskSummary, earningsWarning, Row } from "@/lib/rows";
+import { mergeRows, applyRefresh, selectTopN, riskSummary, earningsWarning, liquidityWarning, dataHealthWarnings, LIQUIDITY_MIN_YEN, Row } from "@/lib/rows";
 import { RefreshRow, Signal, WatchItem } from "@/lib/api";
 
 const watch: WatchItem[] = [
@@ -121,5 +121,18 @@ describe("earningsWarning", () => {
     expect(earningsWarning(-1)).toBeNull();
     expect(earningsWarning(6)).toBeNull();
     expect(earningsWarning(8, 7)).toBeNull();              // しきい値超は引数変更後も null
+  });
+});
+
+describe("liquidityWarning", () => {
+  it("平均売買代金が閾値未満なら {turnover}", () => {
+    expect(liquidityWarning(50_000_000)).toEqual({ turnover: 50_000_000 });
+  });
+  it("閾値以上は null", () => {
+    expect(liquidityWarning(LIQUIDITY_MIN_YEN)).toBeNull();
+    expect(liquidityWarning(500_000_000)).toBeNull();
+  });
+  it("null（不明・旧行）は警告しない", () => {
+    expect(liquidityWarning(null)).toBeNull();
   });
 });

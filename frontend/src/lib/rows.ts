@@ -100,3 +100,17 @@ export function earningsWarning(
   }
   return { days: daysToEarnings };
 }
+
+/** 薄商い警告のしきい値（円・平均売買代金/日）。1億円未満を「実約定に難あり」とみなす。
+ *  ※ 個人の実約定可能性の目安。設定化は将来。決算の EARNINGS_WARN_DAYS と同型のフロント定数。 */
+export const LIQUIDITY_MIN_YEN = 100_000_000;
+
+/** 平均売買代金がしきい値未満なら {turnover} を返す純関数（それ以外 null）。
+ *  null（不明・旧行）は警告しない＝「不明=非干渉」。 */
+export function liquidityWarning(
+  avgTurnover: number | null,
+  threshold = LIQUIDITY_MIN_YEN,
+): { turnover: number } | null {
+  if (avgTurnover == null || avgTurnover >= threshold) return null;
+  return { turnover: avgTurnover };
+}
