@@ -78,6 +78,7 @@ export type PlanRow = {
   risk_amount: number | null;
   rationale: string | null;
   confidence: number | null;
+  regime: "risk_on" | "neutral" | "risk_off" | null;  // 打ち手11で永続化済み・/plan は SELECT * で配信
   days_to_earnings: number | null;
   avg_turnover: number | null;   // 平均売買代金（円・直近20日）。打ち手12
   data_health: string | null;    // JSON: {zero_volume_days,gap_days,spike_days}。健全/旧行は null
