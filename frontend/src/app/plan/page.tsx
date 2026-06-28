@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, Holding, PlanRow, WatchItem } from "@/lib/api";
-import { earningsWarning, riskSummary, selectTopN } from "@/lib/rows";
+import { dataHealthWarnings, earningsWarning, liquidityWarning, riskSummary, selectTopN } from "@/lib/rows";
 import DirectionBadge from "@/components/DirectionBadge";
 import Disclaimer from "@/components/Disclaimer";
 import StockAddSearch from "@/components/StockAddSearch";
@@ -144,7 +144,7 @@ export default function PlanBoard() {
           <h2 className="mb-1 text-base font-bold text-blue-800">
             今夜の推奨 Top {topPicks.length}
           </h2>
-          <p className="mb-2 text-xs text-slate-500">確信度の高い順。下の全リストにも再掲されます。</p>
+          <p className="mb-2 text-xs text-slate-500">確信度の高い順。薄商い銘柄は除外しています。下の全リストにも再掲されます。</p>
           <div className="space-y-3">
             {topPicks.map((pick) => {
               const wi = watch.find((x) => x.ticker === pick.ticker);
@@ -224,6 +224,15 @@ function PlanCard({
             </span>
           ) : null;
         })()}
+        {row && (() => {
+          const lw = liquidityWarning(row.avg_turnover);
+          return lw ? (
+            <span className="rounded bg-amber-600 px-1.5 py-0.5 text-xs font-semibold text-white"
+                  title="薄商い：提案指値は約定しづらく滑りやすい（今夜の推奨からは除外）">
+              ⚠ 薄商い 売買代金 約{Math.round(lw.turnover / 1e6).toLocaleString()}百万円/日
+            </span>
+          ) : null;
+        })()}
         {row?.vol_ratio != null && <span className="text-sm text-slate-500">出来高 {row.vol_ratio.toFixed(2)}倍</span>}
         {row?.weekly_trend && (
           <span className={`text-sm ${TREND_CLASS[row.weekly_trend] ?? ""}`}>
@@ -234,6 +243,13 @@ function PlanCard({
           チャート →
         </Link>
       </div>
+
+      {row && (() => {
+        const dh = dataHealthWarnings(row.data_health);
+        return dh.length ? (
+          <p className="mb-2 text-xs text-amber-700">データ注意: {dh.join(" / ")}</p>
+        ) : null;
+      })()}
 
       <HoldingEditor ticker={ticker} holding={holding} price={price} pnl={pnl} pnlPct={pnlPct} onChanged={onChanged} />
 
