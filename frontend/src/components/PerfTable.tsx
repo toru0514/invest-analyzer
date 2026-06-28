@@ -35,7 +35,7 @@ export default function PerfTable({ rows }: { rows: PerfRow[] }) {
               {pct100(r.win_rate)}
               {r.n_resolved ? ` (${r.n_resolved})` : ""}
             </td>
-            <td className={r.avg_r != null && r.avg_r > 0 ? "text-green-700" : "text-red-700"}>
+            <td className={r.avg_r == null ? "" : r.avg_r > 0 ? "text-green-700" : "text-red-700"}>
               {num(r.avg_r)}
             </td>
             <td>{num(r.avg_days, 1)}</td>

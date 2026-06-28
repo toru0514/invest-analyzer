@@ -502,7 +502,8 @@ def upsert_plan(row: dict):
             "stop_price=excluded.stop_price, target_price=excluded.target_price, "
             "rationale=excluded.rationale, confidence=excluded.confidence, "
             "shares=excluded.shares, risk_amount=excluded.risk_amount, "
-            "days_to_earnings=excluded.days_to_earnings, regime=excluded.regime, "
+            "days_to_earnings=excluded.days_to_earnings, "
+            "regime=COALESCE(excluded.regime, daily_plan.regime), "
             "ai_summary=excluded.ai_summary, "
             "ai_confidence=excluded.ai_confidence, ai_risks=excluded.ai_risks, "
             "created_at=datetime('now')",
