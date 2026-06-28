@@ -453,7 +453,7 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
             "target_price": plan["target_price"], "rationale": plan["rationale"],
             "confidence": detail.get("confidence"),
             "shares": plan_shares, "risk_amount": plan_risk,
-            "days_to_earnings": days_to_earnings,
+            "days_to_earnings": days_to_earnings, "regime": regime,
             "ai_summary": commentary["summary"] if commentary else None,
             "ai_confidence": commentary["confidence"] if commentary else None,
             "ai_risks": json.dumps(commentary["risks"], ensure_ascii=False) if commentary else None,
@@ -462,6 +462,10 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
         results.append({"id": sid, "ticker": ticker, "date": date, "price": last_close,
                         "score": score, "direction": direction, "detail": detail})
 
+    try:
+        db.resolve_plan_outcomes()   # 過去作戦の結果を price_data から解決（best-effort・打ち手11）
+    except Exception:
+        pass
     plan_date = _next_business_day(results[-1]["date"]) if results else None
     return {"updated": results, "failed": failed, "plan_date": plan_date,
             "note": "yfinance 取得失敗時は demo=true で合成データを使えます。" if failed else None}
@@ -470,6 +474,12 @@ def perform_refresh(demo: bool = False, period: str = "6mo") -> dict:
 @app.post("/refresh")
 def refresh(demo: bool = Query(False), period: str = Query("6mo")):
     return perform_refresh(demo=demo, period=period)
+
+
+@app.get("/performance")
+def performance():
+    """型別（レジーム×方向）の実績成績（打ち手11・実績トラッキング）。"""
+    return {"summary": db.performance_summary()}
 
 
 # ---------------------------------------------------------------------------

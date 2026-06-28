@@ -502,6 +502,18 @@ def test_daily_plan_outcome_columns_and_regime(tmp_path, monkeypatch):
     dbmod.init_db()   # 冪等（再実行で例外なし）
 
 
+def test_performance_endpoint(client):
+    """GET /performance は型別成績の list を返す（打ち手11）。"""
+    r = client.get("/performance")
+    assert r.status_code == 200 and isinstance(r.json()["summary"], list)
+
+
+def test_refresh_persists_regime(client):
+    """refresh(demo) が regime 列保存＆結果解決を通っても例外を出さず /performance が回る。"""
+    client.post("/refresh?demo=true")
+    assert client.get("/performance").status_code == 200
+
+
 def test_resolve_plan_outcomes_and_summary(tmp_path, monkeypatch):
     """price_data の将来足から作戦を解決し型別集計。terminal は再解決しない（冪等）。"""
     import db as dbmod
