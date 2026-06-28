@@ -515,6 +515,49 @@ def latest_plan_date():
     return row["d"] if row else None
 
 
+def resolve_plan_outcomes():
+    """未解決(resolved_date IS NULL)の作戦を price_data の将来足から解決（打ち手11）。
+
+    tracking.resolve_outcome で判定し fill_status/outcome/exit_price/result_r/days_held を UPDATE。
+    terminal(n/a・expired・target・stop)のときだけ resolved_date を立てる＝以後スキップ（冪等）。
+    非終端(pending・open)は resolved_date を NULL のまま＝price_data 増で再解決。戻り＝今回終端化した件数。
+    """
+    import tracking
+    resolved = 0
+    with get_conn() as conn:
+        plans = conn.execute(
+            "SELECT id, ticker, plan_date, direction, limit_price, stop_price, target_price "
+            "FROM daily_plan WHERE resolved_date IS NULL").fetchall()
+        for p in plans:
+            bars = [dict(b) for b in conn.execute(
+                "SELECT date, open, high, low, close FROM price_data "
+                "WHERE ticker = ? AND date >= ? ORDER BY date",
+                (p["ticker"], p["plan_date"])).fetchall()]
+            r = tracking.resolve_outcome(dict(p), bars)
+            terminal = r["fill_status"] in ("n/a", "expired") or r["outcome"] in ("target", "stop")
+            rd = (r["resolved_date"] or p["plan_date"]) if terminal else None
+            conn.execute(
+                "UPDATE daily_plan SET fill_status=?, outcome=?, exit_price=?, result_r=?, "
+                "days_held=?, resolved_date=? WHERE id=?",
+                (r["fill_status"], r["outcome"], r["exit_price"], r["result_r"],
+                 r["days_held"], rd, p["id"]))
+            if terminal:
+                resolved += 1
+    return resolved
+
+
+def performance_summary():
+    """daily_plan の結果を型別（レジーム×方向）に集計して返す（打ち手11・tracking.aggregate_performance）。"""
+    import tracking
+    with get_conn() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT regime, direction, fill_status, outcome, result_r, days_held "
+            "FROM daily_plan").fetchall()]
+    for r in rows:
+        r["plan_type"] = tracking.plan_type(r.get("direction"), r.get("regime"))
+    return tracking.aggregate_performance(rows)
+
+
 def list_plan(plan_date=None):
     if plan_date is None:
         plan_date = latest_plan_date()

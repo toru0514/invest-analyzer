@@ -502,6 +502,28 @@ def test_daily_plan_outcome_columns_and_regime(tmp_path, monkeypatch):
     dbmod.init_db()   # 冪等（再実行で例外なし）
 
 
+def test_resolve_plan_outcomes_and_summary(tmp_path, monkeypatch):
+    """price_data の将来足から作戦を解決し型別集計。terminal は再解決しない（冪等）。"""
+    import db as dbmod
+    import pandas as pd
+    monkeypatch.setattr(dbmod, "DB_PATH", str(tmp_path / "resolve.db"))
+    dbmod.init_db()
+    dbmod.upsert_plan({"ticker": "X.T", "plan_date": "2026-01-05", "direction": "buy", "score": 3,
+                       "vol_ratio": None, "weekly_trend": None, "rationale": None,
+                       "limit_price": 100.0, "stop_price": 90.0, "target_price": 140.0, "regime": "risk_on"})
+    idx = pd.to_datetime(["2026-01-05", "2026-01-06"])
+    df = pd.DataFrame({"open": [101.0, 120.0], "high": [102.0, 141.0], "low": [99.0, 119.0],
+                       "close": [101.0, 140.0], "volume": [1000, 1000]}, index=idx)
+    dbmod.upsert_prices("X.T", df)
+    n = dbmod.resolve_plan_outcomes()
+    assert n >= 1
+    row = [p for p in dbmod.list_plan("2026-01-05") if p["ticker"] == "X.T"][0]
+    assert row["outcome"] == "target" and abs(row["result_r"] - 4.0) < 1e-9 and row["resolved_date"]
+    summary = dbmod.performance_summary()
+    t = [s for s in summary if s["type"] == "risk_on:buy"][0]
+    assert t["n_resolved"] == 1 and t["win_rate"] == 100.0
+
+
 def test_plan_has_risk_sizing_for_buy(client):
     """null 経路の不変条件: 全 plan 行に shares/risk_amount キーが存在し、非 buy 行は None。
     （buy 経路の実サイジングは test_perform_refresh_sizes_buy_end_to_end が担保）"""
