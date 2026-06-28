@@ -157,8 +157,12 @@ const TIER_WORD: Record<"high" | "mid" | "low", string> = {
   high: "高め", mid: "中程度", low: "低め",
 };
 
-/** 型ラベル（順張り/逆張り）。direction × weekly_trend の2軸で決める（regime は使わない）。 */
-function planTypeLabel(direction: Direction, weekly: string | null): string {
+/** 型ラベル（順張り/逆張り）。direction × weekly_trend の2軸で決める（regime は使わない）。
+ *  neutral ガード後に呼ぶ前提で direction は buy/sell に絞る（typo はコンパイラが検出）。 */
+function planTypeLabel(
+  direction: "buy" | "sell",
+  weekly: "up" | "down" | "flat" | null,
+): string {
   if (direction === "buy") {
     if (weekly === "up") return "上昇トレンドの押し目買い";
     if (weekly === "flat") return "横ばいでの反発狙い";

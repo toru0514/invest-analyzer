@@ -204,6 +204,21 @@ describe("planRationale", () => {
     });
     expect(s).toBe("押し目買い。");
   });
+  it("型ラベルの残り分岐（buy×flat / sell×down / sell×flat / sell×null）を固定", () => {
+    const t = (direction: "buy" | "sell", weekly_trend: "up" | "down" | "flat" | null) =>
+      planRationale({ direction, weekly_trend, regime: null, vol_ratio: null, confidence: null });
+    expect(t("buy", "flat")).toBe("横ばいでの反発狙い。");
+    expect(t("sell", "down")).toBe("下降トレンドの戻り売り。");
+    expect(t("sell", "flat")).toBe("横ばいでの戻り売り。");
+    expect(t("sell", null)).toBe("戻り売り。");
+  });
+  it("出来高は1.5倍ちょうどで後押しに入る（境界）", () => {
+    const s = planRationale({
+      direction: "buy", weekly_trend: "up", regime: null,
+      vol_ratio: 1.5, confidence: null,
+    });
+    expect(s).toBe("上昇トレンドの押し目買い。出来高1.5倍が後押し。");
+  });
   it("neutral は null", () => {
     expect(planRationale({
       direction: "neutral", weekly_trend: "up", regime: "risk_on",
@@ -239,6 +254,9 @@ describe("planRisks", () => {
   });
   it("出来高細りを出す", () => {
     expect(planRisks(mk({ vol_ratio: 0.5 }), 1_000_000)).toContain("出来高が細い");
+  });
+  it("出来高0.7ちょうどは細り扱いにしない（境界）", () => {
+    expect(planRisks(mk({ vol_ratio: 0.7 }), 1_000_000)).not.toContain("出来高が細い");
   });
   it("決算近接（earningsWarning 経由）", () => {
     expect(planRisks(mk({ days_to_earnings: 3 }), 1_000_000)).toContain("3日後に決算");
