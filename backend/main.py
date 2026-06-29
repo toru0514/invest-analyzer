@@ -80,9 +80,10 @@ app = FastAPI(title="株価シグナル通知アプリ API", version="0.3.0", li
 
 app.add_middleware(
     CORSMiddleware,
-    # ローカル専用。Next.js は :3000 が埋まっていると :3001 等に逃げるため、
-    # localhost / 127.0.0.1 の任意ポートを許可する。
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+    # ローカル＋Tailnet 専用。Next.js は :3000 が埋まっていると :3001 等に逃げるため任意ポートを許可。
+    # localhost / 127.0.0.1 に加え、Tailscale の CGNAT(100.x) と MagicDNS(*.ts.net) origin を許可する
+    # （スマホ等から Tailscale 経由で開いた frontend からの API 呼び出しを通すため）。
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|100\.\d{1,3}\.\d{1,3}\.\d{1,3}|[a-z0-9-]+\.[a-z0-9-]+\.ts\.net):\d+",
     allow_methods=["*"],
     allow_headers=["*"],
 )

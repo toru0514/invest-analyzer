@@ -1,7 +1,14 @@
 // Python API（FastAPI / :8000）クライアント
 
+// 既定は「表示中のページと同じホストの :8000」を指す。
+// localhost / LAN IP / Tailscale 名のどれで開いても、その同じホストの backend を叩くので、
+// スマホから Tailscale 経由で開いたときに localhost がスマホ自身を指してしまう問題を回避できる。
+// 明示的に上書きしたい場合は NEXT_PUBLIC_API_BASE を優先する。
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_BASE ??
+  (typeof window !== "undefined"
+    ? `http://${window.location.hostname}:8000`
+    : "http://localhost:8000");
 
 export type WatchItem = {
   id: number;
