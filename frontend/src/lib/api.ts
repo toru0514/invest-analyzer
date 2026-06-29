@@ -193,6 +193,9 @@ export const api = {
     req<{ deleted: number }>(`/watchlist/${id}`, { method: "DELETE" }),
   searchStocks: (q: string) =>
     req<{ ticker: string; name: string }[]>(`/stocks/search?q=${encodeURIComponent(q)}`),
+  // ティッカー（コード）から銘柄名を解決（内蔵マスタ→yfinance）。追加前のプレビュー用。
+  resolveName: (ticker: string) =>
+    req<{ ticker: string; name: string; source: string }>(`/stocks/name?ticker=${encodeURIComponent(ticker)}`),
 
   getConfig: () => req<SignalConfig[]>("/config"),
   updateConfig: (updates: { id: number; weight?: number; enabled?: boolean; params?: Record<string, unknown> }[]) =>

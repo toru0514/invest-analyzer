@@ -2,14 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { asTicker, isCompleteCode } from "@/lib/ticker";
 
 type Hit = { ticker: string; name: string };
-
-// コードらしい入力（数字4桁まで・末尾 .T 任意）を東証ティッカーに正規化
-function asTicker(q: string): string | null {
-  const m = q.trim().toUpperCase().match(/^(\d{1,4})(\.T)?$/);
-  return m ? `${m[1]}.T` : null;
-}
 
 /**
  * 名前/コードで検索して選択、もしくはコードを直接入力して追加する。
@@ -22,6 +17,7 @@ export default function StockAddSearch({ onAdded }: { onAdded: () => Promise<voi
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [codeName, setCodeName] = useState<string | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,6 +34,30 @@ export default function StockAddSearch({ onAdded }: { onAdded: () => Promise<voi
       }
     }, 250);
     return () => clearTimeout(t);
+  }, [q]);
+
+  // 完全な4桁コードが入力されたら銘柄名を解決してプレビュー表示する。
+  // 部分入力（5/58/580）や名前では投げない（無駄な解決リクエストを防ぐ）。
+  useEffect(() => {
+    const ticker = isCompleteCode(q) ? asTicker(q) : null;
+    if (!ticker) {
+      setCodeName(null);
+      return;
+    }
+    let cancelled = false;
+    setCodeName(null);
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.resolveName(ticker);
+        if (!cancelled) setCodeName(r.name || null);
+      } catch {
+        if (!cancelled) setCodeName(null);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [q]);
 
   useEffect(() => {
@@ -72,7 +92,7 @@ export default function StockAddSearch({ onAdded }: { onAdded: () => Promise<voi
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (hits.length > 0) return add(hits[0].ticker, hits[0].name);
-    if (codeTicker) return add(codeTicker);
+    if (codeTicker) return add(codeTicker, codeName ?? "");
     // デバウンス未完了でも、押した時点で確定検索してから判断する
     const query = q.trim();
     if (query) {
@@ -121,10 +141,16 @@ export default function StockAddSearch({ onAdded }: { onAdded: () => Promise<voi
             <li className="border-t">
               <button
                 type="button"
-                onClick={() => add(codeTicker!)}
-                className="w-full px-3 py-2 text-left text-blue-700 hover:bg-blue-50"
+                onClick={() => add(codeTicker!, codeName ?? "")}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-blue-50"
               >
-                「{codeTicker}」をコードで追加（名前を自動取得）
+                <span className="font-mono text-slate-500">{codeTicker}</span>
+                {codeName ? (
+                  <span>{codeName}</span>
+                ) : (
+                  <span className="text-slate-400">コードで追加（名前を自動取得）</span>
+                )}
+                <span className="ml-auto text-xs text-blue-700">追加</span>
               </button>
             </li>
           )}
